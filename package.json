@@ -1,0 +1,16 @@
+{
+  "name": "compuute-scan",
+  "version": "0.1.0",
+  "description": "Offline MCP server security scanner — internal tool for Compuute AB",
+  "main": "compuute-scan.js",
+  "bin": {
+    "compuute-scan": "./compuute-scan.js"
+  },
+  "scripts": {
+    "test": "bash test.sh"
+  },
+  "keywords": ["mcp", "security", "scanner"],
+  "author": "Compuute AB",
+  "license": "UNLICENSED",
+  "private": true
+}

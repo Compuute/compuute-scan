@@ -1,0 +1,64 @@
+# compuute-scan — Secure scanning environment
+# Usage:
+#   docker compose run --rm scan ./target-repo
+#   docker compose run --rm scan ./target-repo --output /reports/report.md
+#
+# Clone a repo first:
+#   docker compose run --rm clone clone --depth 1 <git-url> /home/scanner/repos/<name>
+#
+# Or mount a local repo:
+#   docker compose run --rm -v /path/to/repo:/home/scanner/repos/target:ro scan ./target
+
+services:
+  scan:
+    build: .
+    read_only: true
+    network_mode: "none"       # ZERO network stack — no IP, no DNS, nothing
+    tmpfs:
+      - /tmp:size=50M
+    volumes:
+      # Persistent volume for cloned repos (isolated from host filesystem)
+      - scan-repos:/home/scanner/repos:ro    # Read-only — scanner cannot modify client code
+      # Reports output (mounted to host for access)
+      - ./reports:/home/scanner/reports
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL                    # Drop ALL Linux capabilities
+
+  # One-time clone service (has network access ONLY for git clone)
+  clone:
+    build: .
+    entrypoint: git
+    read_only: true
+    tmpfs:
+      - /tmp:size=100M
+    volumes:
+      - scan-repos:/home/scanner/repos
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_RAW              # Minimum needed for git clone over HTTPS
+    networks:
+      - clone-net
+
+volumes:
+  scan-repos:
+    name: compuute-scan-repos
+
+networks:
+  # Clone network — HAS internet (only for git clone, not for scanning)
+  clone-net:
+    driver: bridge
