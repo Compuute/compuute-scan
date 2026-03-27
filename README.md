@@ -2,9 +2,9 @@
 
 **Static security scanner for MCP servers. Zero dependencies. OWASP LLM Top 10 + NIS2 mapped.**
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue)](#)
+[![Version](https://img.shields.io/badge/version-0.2.0-blue)](#)
 [![License](https://img.shields.io/badge/license-MIT-green)](#license)
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](#testing)
+[![CI](https://github.com/Compuute/compuute-scan/actions/workflows/ci.yml/badge.svg)](https://github.com/Compuute/compuute-scan/actions/workflows/ci.yml)
 
 ---
 
@@ -47,15 +47,15 @@ docker compose build
 
 ## What It Scans
 
-**23 rules across 5 VIGIL security layers:**
+**28 rules across 5 VIGIL security layers:**
 
 | Layer | Focus | Rules | Examples |
 |-------|-------|-------|----------|
 | **L0** | Discovery | Metadata | Transport detection, tool inventory, dependency pinning |
-| **L1** | Sandboxing | 8 | `eval()`, `child_process`, path traversal, `0.0.0.0` binding |
+| **L1** | Sandboxing | 9 | `eval()`, `child_process`, path traversal, `0.0.0.0` binding, dynamic imports |
 | **L2** | Authorization | 4 | Hardcoded secrets, JWT expiry, missing auth/RBAC |
-| **L3** | Tool Integrity | 6 | SSRF, SQL injection, JSON serialization leaks, input validation |
-| **L4** | Monitoring | 5 | Missing audit logs, rate limiting, error information leakage |
+| **L3** | Tool Integrity | 9 | SSRF, SQL injection, prompt injection in tool metadata, supply chain (npm hooks, unpinned git deps) |
+| **L4** | Monitoring | 6 | Missing audit logs, rate limiting, error leakage, ReDoS patterns |
 
 ### Guard Detection
 
@@ -120,12 +120,24 @@ For client engagements, `scan.sh` provides a hardened workflow where scanned cod
 ```
 compuute-scan <path> [options]
 
-  --output, -o <file>     Write report to file (Markdown)
-  --json                  Output as JSON (for CI integration)
-  --layer <L0-L4>         Filter by VIGIL layer
-  --min-severity <level>  Filter by minimum severity (critical|high|medium|low)
-  --verbose               Show files being scanned
-  --help, -h              Show help
+  --output, -o <file>        Write report to file
+  --json                     Output as JSON
+  --sarif                    Output as SARIF (GitHub Code Scanning)
+  --layer <L0-L4>            Filter by VIGIL layer
+  --min-severity <level>     Filter: critical, high, medium, low
+  --fail-on-severity <level> Exit code 1 if findings >= severity (for CI)
+  --verbose                  Show files being scanned
+  --help, -h                 Show help
+```
+
+### CI Integration
+
+```yaml
+# GitHub Actions example
+- run: npx compuute-scan ./src --fail-on-severity high --sarif --output results.sarif
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: results.sarif
 ```
 
 ## Adding Rules
@@ -134,7 +146,7 @@ Rules are defined as objects in `compuute-scan.js`:
 
 ```javascript
 {
-  id: 'L1-009',
+  id: 'L1-010',
   title: 'Description',
   layer: 'L1',
   severity: 'high',
@@ -157,7 +169,7 @@ The test suite validates detection accuracy against 9 purpose-built vulnerable M
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
 
 ## Contact
 

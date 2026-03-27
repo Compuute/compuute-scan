@@ -12,7 +12,7 @@ const path = require('path');
 // Constants
 // ─────────────────────────────────────────────
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 const MAX_FILE_SIZE = 500 * 1024; // 500 KB
 const GUARD_WINDOW = 15; // lines above/below to check for guards
 
@@ -37,9 +37,11 @@ function parseArgs(argv) {
     repoPath: null,
     output: null,
     json: false,
+    sarif: false,
     verbose: false,
     layer: null,    // filter by layer e.g. "L1"
     minSeverity: null,
+    failOnSeverity: null,
     help: false,
   };
 
@@ -47,10 +49,12 @@ function parseArgs(argv) {
     const a = args[i];
     if (a === '--help' || a === '-h') { opts.help = true; }
     else if (a === '--json') { opts.json = true; }
+    else if (a === '--sarif') { opts.sarif = true; }
     else if (a === '--verbose' || a === '-v') { opts.verbose = true; }
     else if (a === '--output' || a === '-o') { opts.output = args[++i]; }
     else if (a === '--layer') { opts.layer = args[++i]?.toUpperCase(); }
     else if (a === '--min-severity') { opts.minSeverity = args[++i]?.toLowerCase(); }
+    else if (a === '--fail-on-severity') { opts.failOnSeverity = args[++i]?.toLowerCase(); }
     else if (!a.startsWith('-')) { opts.repoPath = a; }
   }
 
@@ -66,18 +70,27 @@ Usage:
   compuute-scan <repo-path> [options]
 
 Options:
-  --output <file>      Write report to file (markdown or json)
-  --json               Output JSON instead of markdown
-  --verbose            Show files being scanned
-  --layer <L0-L4>      Filter findings by layer
-  --min-severity <s>   Filter: critical, high, medium, low
-  --help               Show this message
+  --output <file>         Write report to file
+  --json                  Output JSON instead of markdown
+  --sarif                 Output SARIF (GitHub Code Scanning)
+  --verbose               Show files being scanned
+  --layer <L0-L4>         Filter findings by layer
+  --min-severity <s>      Filter: critical, high, medium, low
+  --fail-on-severity <s>  Exit code 1 if findings >= severity (for CI)
+  --help                  Show this message
+
+Exit codes:
+  0  No findings (or below --fail-on-severity threshold)
+  1  Findings at or above --fail-on-severity threshold
+  2  Scanner error (invalid path, etc.)
 
 Examples:
   compuute-scan ./my-mcp-server
   compuute-scan ./server --output report.md
   compuute-scan ./server --json --output report.json
+  compuute-scan ./server --sarif --output report.sarif
   compuute-scan ./server --layer L1 --min-severity high
+  compuute-scan ./server --fail-on-severity high
 `);
 }
 
@@ -316,6 +329,25 @@ const L1_RULES = [
     },
     guards: [/ast\.literal_eval/, /restricted/i, /sandbox/i],
   },
+  {
+    id: 'L1-009',
+    title: 'Dynamic import/require with variable path',
+    layer: 'L1',
+    severity: 'high',
+    owasp: 'A03:2021 Injection',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'Dynamic import() or require() with a variable argument allows loading arbitrary modules at runtime. An attacker who controls the path can load malicious code.',
+    recommendation: 'Use static imports or maintain an explicit allowlist of permitted module paths. Validate and sanitize any dynamic paths against a whitelist.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*#/.test(line)) return false;
+      // import(variable) — not import('literal')
+      if (/\bimport\s*\(/.test(line) && !/\bimport\s*\(\s*['"`]/.test(line)) return true;
+      // require(variable) — not require('literal')
+      if (/\brequire\s*\(/.test(line) && !/\brequire\s*\(\s*['"`]/.test(line)) return true;
+      return false;
+    },
+    guards: [/allowlist/i, /whitelist/i, /allowedModules/i, /safeRequire/i, /validateModule/i],
+  },
 ];
 
 // ─────────────────────────────────────────────
@@ -503,6 +535,69 @@ const L3_RULES = [
     },
     guards: [/verify/i, /hash/i, /integrity/i, /sha256/i, /checksum/i, /crypto/i],
   },
+  {
+    id: 'L3-007',
+    title: 'Prompt injection in tool description',
+    layer: 'L3',
+    severity: 'high',
+    owasp: 'A03:2021 Injection',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'Tool descriptions containing instruction-like patterns (e.g., "ignore previous", "system:", hidden directives) can manipulate LLM behavior via prompt injection.',
+    recommendation: 'Keep tool descriptions factual and short. Never embed instructions, system prompts, or behavioral directives in tool metadata.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*#/.test(line)) return false;
+      // Must be in a description context
+      if (!/description/i.test(line)) return false;
+      // Check for injection patterns in the description value
+      const injectionPatterns = [
+        /ignore\s+(previous|prior|above|all)/i,
+        /forget\s+(previous|prior|your|all)/i,
+        /\bsystem\s*:/i,
+        /<\s*SYSTEM\s*>/i,
+        /you\s+(are|must|should|will)\b/i,
+        /do\s+not\s+(reveal|share|tell|mention)/i,
+        /\[INST\]/i,
+        /<<\s*SYS\s*>>/i,
+        /IMPORTANT\s*:/i,
+        /override/i,
+      ];
+      return injectionPatterns.some(p => p.test(line));
+    },
+    guards: [/sanitize/i, /escape/i, /filter/i, /validate/i],
+  },
+  {
+    id: 'L3-008',
+    title: 'npm lifecycle script (supply chain risk)',
+    layer: 'L3',
+    severity: 'medium',
+    owasp: 'A08:2021 Software and Data Integrity Failures',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'npm preinstall/postinstall scripts execute automatically during npm install. Malicious packages use these hooks to run arbitrary code on the developer machine.',
+    recommendation: 'Audit all preinstall/postinstall scripts. Use --ignore-scripts for untrusted packages. Consider using npm config set ignore-scripts true globally.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line) || /^\s*#/.test(line)) return false;
+      return /["'](preinstall|postinstall|preuninstall|postuninstall)["']\s*:/.test(line);
+    },
+    guards: [/husky/i, /lint-staged/i, /prepare/i],
+  },
+  {
+    id: 'L3-009',
+    title: 'Unpinned git dependency (rug-pull risk)',
+    layer: 'L3',
+    severity: 'high',
+    owasp: 'A08:2021 Software and Data Integrity Failures',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'Dependencies pointing to git URLs without a pinned commit hash can be changed by the repo owner at any time (rug-pull). The next npm install may pull malicious code.',
+    recommendation: 'Pin git dependencies to a specific commit hash: "package": "git+https://github.com/org/repo.git#abc123". Prefer npm registry packages with lockfile pinning.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line) || /^\s*#/.test(line)) return false;
+      // git+https:// or git+ssh:// or github: without a commit hash (#sha)
+      if (/["']git\+(https|ssh):\/\//.test(line) && !/#[0-9a-f]{7,40}/.test(line)) return true;
+      if (/["']github:/.test(line) && !/#[0-9a-f]{7,40}/.test(line)) return true;
+      return false;
+    },
+    guards: [/#[0-9a-f]{7,40}/, /integrity/i, /commit/i],
+  },
 ];
 
 // Negative check rules for L3
@@ -609,6 +704,28 @@ const L4_NEGATIVE_RULES = [
     description: 'No rate limiting mechanism was found. MCP servers exposed over HTTP should limit request rates to prevent abuse.',
     recommendation: 'Implement rate limiting using a middleware (express-rate-limit, slowapi) or at the gateway/proxy level.',
     pattern: /\b(rateLimit|throttle|rateLimiter|slowapi|express.rate.limit|rate.limit)\b/i,
+  },
+];
+
+const L4_RULES_EXTRA = [
+  {
+    id: 'L4-006',
+    title: 'ReDoS pattern (regex denial of service)',
+    layer: 'L4',
+    severity: 'medium',
+    owasp: 'A04:2021 Insecure Design',
+    nis2: 'Art. 21(2)(d) — Network security',
+    description: 'Regular expressions with nested quantifiers (e.g., (a+)+, (a*)*) are vulnerable to catastrophic backtracking. Malicious input can cause the regex engine to hang, enabling denial-of-service.',
+    recommendation: 'Rewrite the regex to avoid nested quantifiers. Use atomic groups or possessive quantifiers where supported. Consider using re2 or a regex engine with linear-time guarantees.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*#/.test(line)) return false;
+      // Detect nested quantifiers: (x+)+, (x*)+, (x+)*, (x*)*
+      if (/\([^)]*[+*][^)]*\)[+*{]/.test(line)) return true;
+      // Overlapping alternation with quantifiers: (a|a)+
+      if (/\([^)]*\|[^)]*\)[+*{]/.test(line) && /(\w)\|.*\1/.test(line)) return true;
+      return false;
+    },
+    guards: [/re2/i, /timeout/i, /safe.regex/i, /linear/i],
   },
 ];
 
@@ -979,6 +1096,82 @@ function generateJsonReport(repoPath, findings, discovery, durationMs) {
   }, null, 2);
 }
 
+function generateSarifReport(repoPath, findings, discovery, durationMs) {
+  const repoName = path.basename(path.resolve(repoPath));
+
+  const severityToSarif = {
+    critical: 'error',
+    high: 'error',
+    medium: 'warning',
+    low: 'note',
+    info: 'note',
+  };
+
+  const rules = [];
+  const ruleIndex = {};
+  const results = [];
+
+  for (const f of findings) {
+    if (!(f.id in ruleIndex)) {
+      ruleIndex[f.id] = rules.length;
+      rules.push({
+        id: f.id,
+        name: f.title,
+        shortDescription: { text: f.title },
+        fullDescription: { text: f.description || f.title },
+        helpUri: 'https://compuute.se',
+        properties: {
+          layer: f.layer,
+          owasp: f.owasp || '',
+          nis2: f.nis2 || '',
+        },
+      });
+    }
+
+    if (f.file) {
+      results.push({
+        ruleId: f.id,
+        ruleIndex: ruleIndex[f.id],
+        level: severityToSarif[f.severity] || 'warning',
+        message: { text: f.recommendation || f.description || f.title },
+        locations: [{
+          physicalLocation: {
+            artifactLocation: { uri: f.file, uriBaseId: '%SRCROOT%' },
+            region: { startLine: f.line || 1 },
+          },
+        }],
+        properties: {
+          severity: f.severity,
+          mitigated: f.mitigated || false,
+        },
+      });
+    }
+  }
+
+  return JSON.stringify({
+    $schema: 'https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json',
+    version: '2.1.0',
+    runs: [{
+      tool: {
+        driver: {
+          name: 'compuute-scan',
+          version: VERSION,
+          informationUri: 'https://github.com/Compuute/compuute-scan',
+          rules,
+        },
+      },
+      results,
+      invocations: [{
+        executionSuccessful: true,
+        properties: {
+          filesScanned: discovery.totalSourceFiles,
+          durationMs,
+        },
+      }],
+    }],
+  }, null, 2);
+}
+
 // ─────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────
@@ -994,7 +1187,7 @@ function main() {
   const repoPath = path.resolve(opts.repoPath);
   if (!fs.existsSync(repoPath)) {
     console.error(`Error: Path does not exist: ${repoPath}`);
-    process.exit(1);
+    process.exit(2);
   }
 
   const startTime = Date.now();
@@ -1020,7 +1213,7 @@ function main() {
   }
 
   // Collect all per-file rules
-  const allFileRules = [...L1_RULES, ...L2_RULES, ...L3_RULES, ...L4_RULES];
+  const allFileRules = [...L1_RULES, ...L2_RULES, ...L3_RULES, ...L4_RULES, ...L4_RULES_EXTRA];
 
   // Run per-file scans
   let findings = [];
@@ -1054,7 +1247,9 @@ function main() {
 
   // Generate report
   let report;
-  if (opts.json) {
+  if (opts.sarif) {
+    report = generateSarifReport(repoPath, findings, discovery, durationMs);
+  } else if (opts.json) {
     report = generateJsonReport(repoPath, findings, discovery, durationMs);
   } else {
     report = generateMarkdownReport(repoPath, findings, discovery, durationMs);
@@ -1068,7 +1263,18 @@ function main() {
     console.log(report);
   }
 
-  // Exit with 0 always (tool ran successfully; findings are informational)
+  // Determine exit code
+  if (opts.failOnSeverity) {
+    const threshold = SEVERITY_ORDER[opts.failOnSeverity];
+    if (threshold !== undefined) {
+      const hasFindings = findings.some(f => SEVERITY_ORDER[f.severity] <= threshold);
+      if (hasFindings) {
+        console.error(`\nFindings at or above "${opts.failOnSeverity}" severity detected — exiting with code 1.`);
+        process.exit(1);
+      }
+    }
+  }
+
   process.exit(0);
 }
 
