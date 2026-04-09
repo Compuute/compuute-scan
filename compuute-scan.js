@@ -369,6 +369,117 @@ const L1_RULES = [
     },
     guards: [/allowedOrigins/i, /originWhitelist/i, /corsOptions/i, /origin.*!==.*\*/, /validateOrigin/i],
   },
+  {
+    id: 'L1-012',
+    title: 'Pickle deserialization (arbitrary code execution)',
+    layer: 'L1',
+    severity: 'critical',
+    owasp: 'A08:2021 Software and Data Integrity Failures',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'pickle.load/loads deserializes arbitrary Python objects and can execute code during unpickling. An attacker who controls the input can achieve full remote code execution.',
+    recommendation: 'Never unpickle untrusted data. Use json, msgpack, or protobuf instead. If pickle is required, use hmac-signed payloads and restrict classes via RestrictedUnpickler.',
+    test: (line) => {
+      if (/^\s*#/.test(line)) return false;
+      return /\bpickle\.(loads?|Unpickler)\s*\(/.test(line) || /\bdill\.loads?\s*\(/.test(line) || /\bmarshal\.loads?\s*\(/.test(line);
+    },
+    guards: [/hmac/i, /RestrictedUnpickler/i, /json\.loads/i, /verify.*signature/i, /trusted/i],
+  },
+  {
+    id: 'L1-013',
+    title: 'YAML unsafe load (code execution)',
+    layer: 'L1',
+    severity: 'critical',
+    owasp: 'A08:2021 Software and Data Integrity Failures',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'yaml.load() without SafeLoader can instantiate arbitrary Python objects, leading to remote code execution. yaml.unsafe_load() is explicitly dangerous.',
+    recommendation: 'Use yaml.safe_load() or yaml.load(data, Loader=yaml.SafeLoader). Never use yaml.load() with untrusted input without specifying a safe Loader.',
+    test: (line) => {
+      if (/^\s*#/.test(line)) return false;
+      if (/yaml\.unsafe_load\s*\(/.test(line)) return true;
+      // yaml.load( without SafeLoader/safe_load
+      if (/yaml\.load\s*\(/.test(line) && !/SafeLoader|safe_load|BaseLoader|FullLoader/.test(line)) return true;
+      return false;
+    },
+    guards: [/safe_load/, /SafeLoader/, /BaseLoader/],
+  },
+  {
+    id: 'L1-014',
+    title: 'SQL injection via Python f-string or format',
+    layer: 'L1',
+    severity: 'critical',
+    owasp: 'A03:2021 Injection',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'Building SQL queries with f-strings, %-formatting, or string concatenation allows SQL injection when user input is interpolated directly into the query.',
+    recommendation: 'Use parameterized queries: cursor.execute("SELECT * FROM t WHERE id = ?", (user_id,)). With ORMs, use the query builder instead of raw SQL strings.',
+    test: (line) => {
+      if (/^\s*#/.test(line)) return false;
+      // cursor.execute(f"...") or .execute(f"...")
+      if (/\.execute\s*\(\s*f['"`]/.test(line)) return true;
+      // cursor.execute("..." % var) — %-formatting
+      if (/\.execute\s*\(\s*['"`].*%s/.test(line) && /%\s*\(/.test(line)) return true;
+      // cursor.execute("..." + var + "...")
+      if (/\.execute\s*\(\s*['"`].*\+/.test(line) && /SELECT|INSERT|UPDATE|DELETE|WHERE/i.test(line)) return true;
+      return false;
+    },
+    guards: [/parameterized/i, /prepared/i, /placeholder/i, /\?\s*,/, /%s.*,\s*\(/, /sqlalchemy/i],
+  },
+  {
+    id: 'L1-015',
+    title: 'SSL/TLS verification disabled',
+    layer: 'L1',
+    severity: 'high',
+    owasp: 'A02:2021 Cryptographic Failures',
+    nis2: 'Art. 21(2)(h) — Cryptography and encryption',
+    description: 'Disabling SSL/TLS certificate verification (verify=False, ssl=False) allows man-in-the-middle attacks. All outbound HTTPS connections should validate certificates.',
+    recommendation: 'Remove verify=False / ssl=False. Use proper CA certificates (certifi). If using self-signed certs in development, restrict to dev environments only.',
+    test: (line) => {
+      if (/^\s*#/.test(line) || /^\s*\/\//.test(line)) return false;
+      // Python: verify=False
+      if (/verify\s*=\s*False/.test(line) && /\.(get|post|put|delete|patch|request|fetch)\s*\(/.test(line)) return true;
+      // Python aiohttp: ssl=False
+      if (/ssl\s*=\s*False/.test(line)) return true;
+      // Node.js: rejectUnauthorized: false
+      if (/rejectUnauthorized\s*:\s*false/.test(line)) return true;
+      // NODE_TLS_REJECT_UNAUTHORIZED = '0'
+      if (/NODE_TLS_REJECT_UNAUTHORIZED/.test(line) && /['"`]0['"`]/.test(line)) return true;
+      return false;
+    },
+    guards: [/certifi/i, /NODE_ENV.*production/i, /development/i, /process\.env\.NODE_TLS/],
+  },
+  {
+    id: 'L1-016',
+    title: 'Insecure random used for security purpose',
+    layer: 'L1',
+    severity: 'high',
+    owasp: 'A02:2021 Cryptographic Failures',
+    nis2: 'Art. 21(2)(h) — Cryptography and encryption',
+    description: 'Using Math.random() or Python random module for tokens, keys, or secrets produces predictable values. These PRNGs are not cryptographically secure.',
+    recommendation: 'Use crypto.randomBytes/randomUUID (Node.js) or secrets.token_hex/token_urlsafe (Python) for any security-sensitive random values.',
+    test: (line) => {
+      if (/^\s*#/.test(line) || /^\s*\/\//.test(line)) return false;
+      const hasWeakRandom = /\b(Math\.random|random\.(choice|choices|randint|sample|random))\s*\(/.test(line);
+      const hasSecurityContext = /\b(token|key|secret|password|nonce|salt|session|csrf|otp|code)\b/i.test(line);
+      return hasWeakRandom && hasSecurityContext;
+    },
+    guards: [/crypto\.randomBytes/, /crypto\.randomUUID/, /\bsecrets\./, /crypto\.getRandomValues/, /uuid/i],
+  },
+  {
+    id: 'L1-017',
+    title: 'Python CORS wildcard (Starlette/FastAPI)',
+    layer: 'L1',
+    severity: 'high',
+    owasp: 'A05:2021 Security Misconfiguration',
+    nis2: 'Art. 21(2)(d) — Network security',
+    description: 'Setting allow_origins=["*"] in Starlette/FastAPI CORSMiddleware allows any website to make cross-origin requests to this MCP server.',
+    recommendation: 'Restrict allow_origins to specific trusted domains. Never use wildcard CORS on MCP servers that handle authenticated requests.',
+    test: (line) => {
+      if (/^\s*#/.test(line)) return false;
+      // allow_origins=["*"] or allow_origins=['*']
+      if (/allow_origins\s*=\s*\[.*['"`]\*['"`]/.test(line)) return true;
+      return false;
+    },
+    guards: [/allow_origins\s*=\s*\[.*(?!['"`]\*['"`])['"`]https?:/, /allowedOrigins/i, /CORS_ORIGINS/i],
+  },
 ];
 
 // Negative check rules for L1 (whole-codebase checks)
@@ -430,6 +541,52 @@ const L2_RULES = [
       return /jwt\.sign\s*\(/.test(line);
     },
     guards: [/expiresIn/, /\bexp\b/, /maxAge/, /expires/],
+  },
+  {
+    id: 'L2-010',
+    title: 'Hardcoded database connection string with credentials',
+    layer: 'L2',
+    severity: 'high',
+    owasp: 'A07:2021 Identification and Authentication Failures',
+    nis2: 'Art. 21(2)(f) — Security in acquisition, development and maintenance',
+    description: 'Database connection strings with embedded usernames and passwords in source code can be extracted by anyone with code access.',
+    recommendation: 'Store connection strings in environment variables or a secrets manager. Use os.environ/process.env to load credentials at runtime.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*#/.test(line)) return false;
+      // postgresql://user:pass@host, mongodb://user:pass@host, redis://:pass@host, mysql://user:pass@host
+      const m = line.match(/(DATABASE_URL|MONGO_URI|REDIS_URL|DB_URL|DSN|CONNECTION_STRING|SQLALCHEMY_DATABASE_URI)\s*[:=]\s*['"`](.*?)['"`]/i);
+      if (m && /\w+:\/\/\w+:\w+@/.test(m[2])) return true;
+      // Inline connection strings without variable name
+      if (/['"`](postgres(ql)?|mongodb(\+srv)?|mysql|redis):\/\/\w+:[^'"`\s]{4,}@/.test(line)) {
+        if (/process\.env|os\.environ|getenv|BaseSettings/.test(line)) return false;
+        return true;
+      }
+      return false;
+    },
+    guards: [/process\.env/, /os\.environ/, /os\.getenv/, /getenv/, /BaseSettings/i, /vault/i, /secrets?\s*manager/i],
+  },
+  {
+    id: 'L2-011',
+    title: 'JWT decoded without signature verification',
+    layer: 'L2',
+    severity: 'high',
+    owasp: 'A07:2021 Identification and Authentication Failures',
+    nis2: 'Art. 21(2)(f) — Security in acquisition, development and maintenance',
+    description: 'Decoding JWTs without verifying the signature allows attackers to forge tokens with arbitrary claims. This bypasses all authentication.',
+    recommendation: 'Always verify JWT signatures. In Python: jwt.decode(token, key, algorithms=["HS256"]). Never set verify=False or options={"verify_signature": False}.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line) || /^\s*#/.test(line)) return false;
+      // Python: jwt.decode(..., verify=False) or options={"verify_signature": False}
+      if (/jwt\.decode\s*\(/.test(line) && /verify\s*[=:]\s*False/.test(line)) return true;
+      if (/jwt\.decode\s*\(/.test(line) && /verify_signature.*False/.test(line)) return true;
+      // Node: jwt.decode (not jwt.verify) — decode doesn't verify
+      if (/jwt\.decode\s*\(/.test(line) && !/jwt\.verify/.test(line)) {
+        // Only flag if it looks like it's used for auth decisions
+        if (/\b(auth|user|role|permission|admin|access)\b/i.test(line)) return true;
+      }
+      return false;
+    },
+    guards: [/jwt\.verify/, /algorithms\s*=/, /verify\s*=\s*True/, /verify_signature.*True/],
   },
   {
     id: 'L2-005',
@@ -538,7 +695,7 @@ const L2_NEGATIVE_RULES = [
     nis2: 'Art. 21(2)(c) — Access control policies',
     description: 'No authentication mechanism was found in the codebase. MCP servers should authenticate clients to prevent unauthorized access.',
     recommendation: 'Implement authentication using JWT, OAuth, API keys, or another mechanism appropriate for your transport.',
-    pattern: /\b(auth|authenticate|requireAuth|jwt|oauth|bearer|api[-_]?key|apiKey|token.*verify|verifyToken|passport|session|login)\b/i,
+    pattern: /\b(auth|authenticate|requireAuth|jwt|oauth|bearer|api[-_]?key|apiKey|token.*verify|verifyToken|passport|session|login|BearerAuthBackend|RequireAuthMiddleware|TokenVerifier|AuthConfig|google\.oauth2)\b/i,
   },
   {
     id: 'L2-003',
@@ -780,9 +937,9 @@ const L3_NEGATIVE_RULES = [
     severity: 'medium',
     owasp: 'A03:2021 Injection',
     nis2: 'Art. 21(2)(e) — Secure development',
-    description: 'No input validation framework (zod, joi, yup, ajv) was found. Tool inputs should be validated against a schema.',
-    recommendation: 'Add input validation using zod, joi, yup, ajv, or use inputSchema with required fields in MCP tool definitions.',
-    pattern: /\b(zod|joi|yup|ajv|schema.*validate|inputSchema.*required|validateInput|Joi\.object|z\.object|z\.string|z\.number)\b/i,
+    description: 'No input validation framework (zod, joi, yup, ajv, pydantic) was found. Tool inputs should be validated against a schema.',
+    recommendation: 'Add input validation using zod, joi, yup, ajv (Node.js) or pydantic BaseModel/Field (Python), or use inputSchema with required fields in MCP tool definitions.',
+    pattern: /\b(zod|joi|yup|ajv|schema.*validate|inputSchema.*required|validateInput|Joi\.object|z\.object|z\.string|z\.number|pydantic|BaseModel|Field\s*\(|Annotated\s*\[|marshmallow)\b/i,
   },
 ];
 
@@ -863,7 +1020,7 @@ const L4_NEGATIVE_RULES = [
     nis2: 'Art. 21(2)(g) — Audit and monitoring',
     description: 'No audit logging or telemetry was detected. MCP tool invocations should be logged for security monitoring and incident response.',
     recommendation: 'Implement audit logging for all tool invocations. Log: who called what tool, when, with which arguments, and the outcome.',
-    pattern: /\b(audit|telemetry|log.*tool|log.*action|monitor|trace.*call|opentelemetry|AuditTrail|auditLog)\b/i,
+    pattern: /\b(audit|telemetry|log.*tool|log.*action|monitor|trace.*call|opentelemetry|AuditTrail|auditLog|structlog|loguru|logging\.getLogger)\b/i,
   },
   {
     id: 'L4-005',
@@ -917,9 +1074,9 @@ function runL0Discovery(repoPath, allContent, sourceFiles) {
 
   // Detect transports
   const transportPatterns = [
-    { name: 'stdio', pattern: /\b(stdio|StdioServerTransport)\b/ },
-    { name: 'SSE', pattern: /\b(SSEServerTransport|sse)\b/i },
-    { name: 'Streamable HTTP', pattern: /\b(StreamableHTTPServerTransport|httpStream)\b/ },
+    { name: 'stdio', pattern: /\b(stdio|StdioServerTransport|stdio_server)\b/ },
+    { name: 'SSE', pattern: /\b(SSEServerTransport|SseServerTransport|sse)\b/i },
+    { name: 'Streamable HTTP', pattern: /\b(StreamableHTTPServerTransport|httpStream|streamable.http)\b/ },
   ];
   for (const tp of transportPatterns) {
     if (tp.pattern.test(allContent)) {
@@ -936,6 +1093,9 @@ function runL0Discovery(repoPath, allContent, sourceFiles) {
     /\.action\s*\(/g,
     /\.query\s*\(/g,
     /\.mutation\s*\(/g,
+    /@\w+\.tool\s*\(/g,                // Python FastMCP decorator
+    /@server\.call_tool\s*\(/g,         // Python low-level MCP
+    /@server\.list_tools\s*\(/g,        // Python low-level MCP
   ];
   let maxToolCount = 0;
   for (const tp of toolPatterns) {
@@ -982,6 +1142,38 @@ function runL0Discovery(repoPath, allContent, sourceFiles) {
       discovery.dependencies = content.split('\n').filter(l => l.trim() && !l.startsWith('#'));
       discovery.dependencyFile = 'requirements.txt';
     } catch { /* skip */ }
+  }
+
+  // Python pyproject.toml dependencies
+  const pyprojectPath = path.join(repoPath, 'pyproject.toml');
+  if (fs.existsSync(pyprojectPath) && !discovery.dependencyFile) {
+    try {
+      const content = fs.readFileSync(pyprojectPath, 'utf-8');
+      const deps = [];
+      // Simple extraction of dependencies from pyproject.toml
+      const depMatches = content.match(/["']([a-zA-Z0-9_-]+(?:\[[\w,]+\])?(?:[><=!~]+[^"']+)?)["']/g);
+      if (depMatches) {
+        for (const m of depMatches) {
+          const cleaned = m.replace(/["']/g, '');
+          if (cleaned.length > 1 && !/^(python|readme|license|description|name|version|author|url|homepage|repository)$/i.test(cleaned)) {
+            deps.push(cleaned);
+          }
+        }
+      }
+      if (deps.length > 0) {
+        discovery.dependencies = deps;
+        discovery.dependencyFile = 'pyproject.toml';
+      }
+    } catch { /* skip */ }
+  }
+
+  // Python lock files for dependency pinning
+  const pyLockFiles = ['poetry.lock', 'uv.lock', 'Pipfile.lock'];
+  for (const lf of pyLockFiles) {
+    if (fs.existsSync(path.join(repoPath, lf))) {
+      discovery.hasDependencyPinning = true;
+      break;
+    }
   }
 
   return discovery;
