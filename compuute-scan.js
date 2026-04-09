@@ -395,6 +395,49 @@ const L2_RULES = [
     },
     guards: [/expiresIn/, /\bexp\b/, /maxAge/, /expires/],
   },
+  {
+    id: 'L2-005',
+    title: 'PII pattern stored or processed without redaction',
+    layer: 'L2',
+    severity: 'high',
+    owasp: 'A04:2021 Insecure Design',
+    nis2: 'Art. 21(2)(f) — Security in acquisition, development and maintenance',
+    dora: 'Art. 6(8) — Data integrity and confidentiality',
+    gdpr: 'Art. 5(1)(c) — Data minimisation; Art. 5(1)(e) — Storage limitation',
+    description: 'Code stores, writes, or persists data matched by PII patterns (e.g., email, SSN, credit card) without redaction. GDPR Art. 5(1)(c) requires data minimisation — only process personal data that is strictly necessary.',
+    recommendation: 'Apply PII redaction (masking, hashing, or tokenisation) before storing or transmitting user-provided text. Use a PII detection library or MCP PII tool (pii.redact) in the data pipeline.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*#/.test(line)) return false;
+      // Detect storing/writing/inserting data that matches PII field names without redaction nearby
+      const hasPiiField = /\b(email|ssn|social.?security|tax.?id|credit.?card|card.?number|phone.?number|personal.?number|personnummer|passport.?number|iban|date.?of.?birth|national.?id)\b/i.test(line);
+      const hasStorage = /\b(save|store|write|insert|put|push|append|create|update|set)\s*\(/i.test(line);
+      if (hasPiiField && hasStorage) return true;
+      // Direct DB writes with PII field names
+      const hasDbOp = /\.(save|create|insert|update|upsert|findAndUpdate|bulkWrite|add)\s*\(/.test(line);
+      if (hasPiiField && hasDbOp) return true;
+      return false;
+    },
+    guards: [/redact/i, /mask/i, /anonymi[sz]e/i, /hash/i, /encrypt/i, /tokenize/i, /pii/i, /sanitize.*pii/i, /gdpr/i],
+  },
+  {
+    id: 'L2-006',
+    title: 'PII logged without masking',
+    layer: 'L2',
+    severity: 'high',
+    owasp: 'A09:2021 Security Logging and Monitoring Failures',
+    nis2: 'Art. 21(2)(g) — Audit and monitoring',
+    dora: 'Art. 6(8) — Data integrity and confidentiality',
+    gdpr: 'Art. 5(1)(c) — Data minimisation; Art. 5(1)(f) — Integrity and confidentiality',
+    description: 'PII fields are passed to logging functions without masking. Log files often have broader access than production databases, making unmasked PII a compliance risk under GDPR Art. 5(1)(f).',
+    recommendation: 'Mask or redact PII before logging. Use structured logging with a PII-safe serialiser that automatically redacts sensitive fields.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*#/.test(line)) return false;
+      const hasPiiField = /\b(email|ssn|social.?security|tax.?id|credit.?card|card.?number|phone.?number|personnummer|passport.?number|iban|national.?id)\b/i.test(line);
+      const hasLog = /\b(console\.(log|info|warn|error|debug)|logger?\.(log|info|warn|error|debug)|log\.(info|warn|error|debug)|logging\.(info|warn|error|debug)|print)\s*\(/i.test(line);
+      return hasPiiField && hasLog;
+    },
+    guards: [/redact/i, /mask/i, /sanitize/i, /\*{3,}/, /pii/i, /scrub/i],
+  },
 ];
 
 // Negative check rules for L2 (whole-codebase checks)
@@ -420,6 +463,19 @@ const L2_NEGATIVE_RULES = [
     description: 'No role-based access control or permission system was found. Tools should be restricted based on user roles.',
     recommendation: 'Implement role-based tool access. Define which roles can invoke which tools. Use a deny-by-default policy.',
     pattern: /\b(role|permission|rbac|canAccess|authorize|isAllowed|filter.*tag|defaultDeny|access.*control)\b/i,
+  },
+  {
+    id: 'L2-007',
+    title: 'No PII detection or redaction mechanism detected',
+    layer: 'L2',
+    severity: 'medium',
+    owasp: 'A04:2021 Insecure Design',
+    nis2: 'Art. 21(2)(f) — Security in acquisition, development and maintenance',
+    dora: 'Art. 6(8) — Data integrity and confidentiality',
+    gdpr: 'Art. 5(1)(c) — Data minimisation; Art. 25 — Data protection by design and by default',
+    description: 'No PII detection, redaction, or masking mechanism was found in the codebase. MCP servers that process user-provided text risk leaking personal data (names, emails, tax IDs, credit cards) in tool responses, logs, or downstream storage — violating GDPR Art. 5(1)(c) data minimisation and Art. 25 data protection by design.',
+    recommendation: 'Integrate a PII redaction layer before storing or returning user-provided text. Options: (1) use an MCP PII server (pii.redact) in the pipeline, (2) add a library like presidio, pii-redactor, or dlp, (3) implement regex-based redaction for your jurisdiction\'s ID formats.',
+    pattern: /\b(pii|redact|anonymi[sz]e|mask.*pii|scrub.*pii|data.?minimi[sz]|gdpr.*redact|personnummer|detect.*pii|pii.*detect|dlp|presidio|pii[-_]?redact)/i,
   },
 ];
 
@@ -597,6 +653,34 @@ const L3_RULES = [
       return false;
     },
     guards: [/#[0-9a-f]{7,40}/, /integrity/i, /commit/i],
+  },
+  {
+    id: 'L3-010',
+    title: 'User-provided text returned in tool response without PII redaction',
+    layer: 'L3',
+    severity: 'high',
+    owasp: 'A04:2021 Insecure Design',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    dora: 'Art. 6(8) — Data integrity and confidentiality',
+    gdpr: 'Art. 5(1)(c) — Data minimisation; Art. 5(1)(b) — Purpose limitation',
+    description: 'Tool responses that echo back or include user-provided text (e.g., body, message, content, query, input) may leak PII to downstream consumers, logs, or LLM context windows. GDPR Art. 5(1)(c) requires that only necessary personal data is processed.',
+    recommendation: 'Apply PII redaction before including user-provided text in tool responses. Use a PII scanning/redaction step (pii.redact, presidio, or regex-based masking) on any user-sourced content before returning it.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*#/.test(line)) return false;
+      // Detect content/text fields in tool responses that reference user-input variables
+      const isToolResponse = /\b(content|text)\s*[:=]/.test(line) && /\b(body|message|input|query|userText|user_text|userData|user_data|user_input|rawText|raw_text|originalText|original_text)\b/.test(line);
+      return isToolResponse;
+    },
+    guards: [/redact/i, /mask/i, /sanitize/i, /pii/i, /anonymi[sz]e/i, /scrub/i, /clean/i, /strip.*pii/i],
+    // Only flag if near a return/response context
+    contextCheck: (lines, idx) => {
+      const start = Math.max(0, idx - 5);
+      const end = Math.min(lines.length - 1, idx + 5);
+      for (let i = start; i <= end; i++) {
+        if (/\breturn\b|\bresponse\b|\bcallTool\b|\bhandle\b|\btool\b/i.test(lines[i])) return true;
+      }
+      return false;
+    },
   },
 ];
 
@@ -843,6 +927,8 @@ function scanFile(filePath, repoPath, allRules) {
           severity: rule.severity,
           owasp: rule.owasp,
           nis2: rule.nis2,
+          gdpr: rule.gdpr || null,
+          dora: rule.dora || null,
           file: relPath,
           line: null,
           code: `${count} occurrences found`,
@@ -888,6 +974,8 @@ function scanFile(filePath, repoPath, allRules) {
         severity: severity,
         owasp: rule.owasp,
         nis2: rule.nis2,
+        gdpr: rule.gdpr || null,
+        dora: rule.dora || null,
         file: relPath,
         line: i + 1,
         code: lines[i].trim().substring(0, 120),
@@ -915,6 +1003,8 @@ function runNegativeChecks(allContent, negativeRules) {
         severity: rule.severity,
         owasp: rule.owasp,
         nis2: rule.nis2,
+        gdpr: rule.gdpr || null,
+        dora: rule.dora || null,
         file: '(entire codebase)',
         line: null,
         code: 'Pattern not found in any source file',
@@ -1019,6 +1109,8 @@ function generateMarkdownReport(repoPath, findings, discovery, durationMs) {
       md += `| **Layer** | ${f.layer} |\n`;
       md += `| **OWASP** | ${f.owasp} |\n`;
       md += `| **NIS2** | ${f.nis2} |\n`;
+      if (f.gdpr) md += `| **GDPR** | ${f.gdpr} |\n`;
+      if (f.dora) md += `| **DORA** | ${f.dora} |\n`;
       if (f.file) md += `| **File** | \`${f.file}\` |\n`;
       if (f.line) md += `| **Line** | ${f.line} |\n`;
       md += '\n';
@@ -1124,6 +1216,8 @@ function generateSarifReport(repoPath, findings, discovery, durationMs) {
           layer: f.layer,
           owasp: f.owasp || '',
           nis2: f.nis2 || '',
+          gdpr: f.gdpr || '',
+          dora: f.dora || '',
         },
       });
     }
