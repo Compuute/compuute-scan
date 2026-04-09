@@ -260,9 +260,14 @@ const L1_RULES = [
     recommendation: 'Bind to 127.0.0.1 (localhost) unless external access is explicitly required. Use a reverse proxy for public exposure.',
     test: (line) => {
       if (/^\s*\/\//.test(line) || /^\s*#/.test(line)) return false;
-      return /['"]0\.0\.0\.0['"]/.test(line) && /(listen|bind|host|run)\s*[=(]/.test(line) || /host\s*[:=]\s*['"]0\.0\.0\.0['"]/.test(line);
+      if (/['"]0\.0\.0\.0['"]/.test(line) && /(listen|bind|host|run)\s*[=(]/.test(line)) return true;
+      if (/host\s*[:=]\s*['"]0\.0\.0\.0['"]/.test(line)) return true;
+      // Go: ListenAndServe(":port", ...) — binds all interfaces
+      if (/ListenAndServe\s*\(\s*["']:/.test(line)) return true;
+      if (/net\.Listen\s*\(\s*["']tcp["']\s*,\s*["'](0\.0\.0\.0)?:/.test(line)) return true;
+      return false;
     },
-    guards: [/reverse.?proxy/i, /nginx/i, /traefik/i, /behind.*proxy/i],
+    guards: [/reverse.?proxy/i, /nginx/i, /traefik/i, /behind.*proxy/i, /127\.0\.0\.1/, /localhost/],
   },
   {
     id: 'L1-006',
@@ -275,12 +280,18 @@ const L1_RULES = [
     recommendation: 'Resolve the full path with path.resolve()/os.path.realpath() and verify it starts with the expected base directory using startsWith().',
     test: (line) => {
       if (/^\s*\/\//.test(line) || /^\s*#/.test(line)) return false;
-      return /path\.join\s*\(/.test(line) || /os\.path\.join\s*\(/.test(line);
+      if (/path\.join\s*\(/.test(line) || /os\.path\.join\s*\(/.test(line)) return true;
+      // Go: filepath.Join
+      if (/filepath\.Join\s*\(/.test(line)) return true;
+      return false;
     },
     guards: [
       /startsWith/, /realpath/, /resolve/, /includes\s*\(\s*['"]\.\.['"]/,
       /throw/, /reject/, /Error/, /normalize/, /is_relative_to/,
       /commonpath/, /abspath/,
+      // Go-specific guards
+      /filepath\.Abs/, /filepath\.Clean/, /filepath\.Rel/,
+      /strings\.HasPrefix/, /EvalSymlinks/, /filepath\.Base/,
     ],
   },
   {
@@ -299,13 +310,18 @@ const L1_RULES = [
       // Python open() with variable path
       if (/\bopen\s*\(/.test(line) && !/\bopen\s*\(\s*['"]/.test(line) && !/\.open\s*\(/.test(line)) {
         // Avoid matching things like file.open(), db.open()
-        return /^[^.]*\bopen\s*\(/.test(line.trim());
+        if (/^[^.]*\bopen\s*\(/.test(line.trim())) return true;
       }
+      // Go: os.ReadFile, os.Open, os.Create with variable path
+      if (/os\.(ReadFile|Open|Create|OpenFile|WriteFile)\s*\(/.test(line) && !/os\.(ReadFile|Open|Create|OpenFile|WriteFile)\s*\(\s*["'`]/.test(line)) return true;
+      // Go: ioutil.ReadFile with variable
+      if (/ioutil\.ReadFile\s*\(/.test(line) && !/ioutil\.ReadFile\s*\(\s*["'`]/.test(line)) return true;
       return false;
     },
     guards: [
       /startsWith/, /realpath/, /resolve/, /includes\s*\(\s*['"]\.\.['"]/,
       /throw/, /reject/, /Error/, /whitelist/i, /allowlist/i, /allowedPaths/i,
+      /filepath\.Abs/, /filepath\.Clean/, /strings\.HasPrefix/, /EvalSymlinks/,
     ],
   },
   {
@@ -619,12 +635,12 @@ const L2_RULES = [
         // Exclude obvious placeholders
         if (/^(your[_-]|xxx|placeholder|changeme|CHANGE|TODO|INSERT|REPLACE|<)/i.test(val)) return false;
         // Exclude process.env references
-        if (/process\.env|os\.environ|getenv/.test(line)) return false;
+        if (/process\.env|os\.environ|getenv|os\.Getenv|viper\.Get/.test(line)) return false;
         return true;
       }
       return false;
     },
-    guards: [/process\.env/, /os\.environ/, /getenv/, /vault/i, /secrets?\s*manager/i],
+    guards: [/process\.env/, /os\.environ/, /getenv/, /os\.Getenv/, /viper/i, /godotenv/i, /envconfig/i, /vault/i, /secrets?\s*manager/i],
   },
   {
     id: 'L2-004',
