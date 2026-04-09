@@ -1,7 +1,7 @@
 {
   "name": "compuute-scan",
-  "version": "0.2.0",
-  "description": "Static security scanner for MCP servers. Zero dependencies. OWASP LLM Top 10 + NIS2 mapped.",
+  "version": "0.3.0",
+  "description": "Static security scanner for MCP servers. Covers 81% of the MCP ecosystem (TS/JS/Python/Go). Zero dependencies. OWASP + NIS2 + GDPR + DORA mapped.",
   "main": "compuute-scan.js",
   "bin": {
     "compuute-scan": "./compuute-scan.js"
@@ -9,7 +9,7 @@
   "scripts": {
     "test": "bash test.sh"
   },
-  "keywords": ["mcp", "security", "scanner", "owasp", "nis2", "dora", "audit"],
+  "keywords": ["mcp", "security", "scanner", "owasp", "nis2", "dora", "gdpr", "audit", "pii", "python", "golang", "typescript"],
   "author": "Compuute AB",
   "license": "MIT",
   "private": false,

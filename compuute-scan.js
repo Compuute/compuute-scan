@@ -12,17 +12,17 @@ const path = require('path');
 // Constants
 // ─────────────────────────────────────────────
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const MAX_FILE_SIZE = 500 * 1024; // 500 KB
 const GUARD_WINDOW = 15; // lines above/below to check for guards
 
 const SCAN_EXTENSIONS = new Set([
-  '.ts', '.js', '.py', '.mjs', '.cjs', '.tsx', '.jsx',
+  '.ts', '.js', '.py', '.mjs', '.cjs', '.tsx', '.jsx', '.go',
 ]);
 
 const SKIP_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', '__pycache__',
-  'coverage', '.turbo', '.next', '.venv', 'venv',
+  'coverage', '.turbo', '.next', '.venv', 'venv', 'vendor',
 ]);
 
 const SEVERITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
@@ -453,15 +453,15 @@ const L1_RULES = [
     severity: 'high',
     owasp: 'A02:2021 Cryptographic Failures',
     nis2: 'Art. 21(2)(h) — Cryptography and encryption',
-    description: 'Using Math.random() or Python random module for tokens, keys, or secrets produces predictable values. These PRNGs are not cryptographically secure.',
-    recommendation: 'Use crypto.randomBytes/randomUUID (Node.js) or secrets.token_hex/token_urlsafe (Python) for any security-sensitive random values.',
+    description: 'Using Math.random() (JS), Python random module, or Go math/rand for tokens, keys, or secrets produces predictable values. These PRNGs are not cryptographically secure.',
+    recommendation: 'Use crypto.randomBytes/randomUUID (Node.js), secrets.token_hex (Python), or crypto/rand (Go) for any security-sensitive random values.',
     test: (line) => {
       if (/^\s*#/.test(line) || /^\s*\/\//.test(line)) return false;
-      const hasWeakRandom = /\b(Math\.random|random\.(choice|choices|randint|sample|random))\s*\(/.test(line);
+      const hasWeakRandom = /\b(Math\.random|random\.(choice|choices|randint|sample|random)|rand\.(Intn|Int31|Int63|Float64|Read))\s*\(/.test(line);
       const hasSecurityContext = /\b(token|key|secret|password|nonce|salt|session|csrf|otp|code)\b/i.test(line);
       return hasWeakRandom && hasSecurityContext;
     },
-    guards: [/crypto\.randomBytes/, /crypto\.randomUUID/, /\bsecrets\./, /crypto\.getRandomValues/, /uuid/i],
+    guards: [/crypto\.randomBytes/, /crypto\.randomUUID/, /\bsecrets\./, /crypto\.getRandomValues/, /crypto\/rand/, /uuid/i],
   },
   {
     id: 'L1-017',
@@ -479,6 +479,105 @@ const L1_RULES = [
       return false;
     },
     guards: [/allow_origins\s*=\s*\[.*(?!['"`]\*['"`])['"`]https?:/, /allowedOrigins/i, /CORS_ORIGINS/i],
+  },
+  {
+    id: 'L1-018',
+    title: 'Go exec.Command with string concatenation',
+    layer: 'L1',
+    severity: 'critical',
+    owasp: 'A03:2021 Injection',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'Using exec.Command with fmt.Sprintf or string concatenation enables shell injection if user input is interpolated. Go exec.Command does not use a shell by default, but passing concatenated strings to "/bin/sh -c" re-introduces the risk.',
+    recommendation: 'Pass arguments as separate parameters to exec.Command (arg-per-slot). Never use fmt.Sprintf to build command strings. Avoid "/bin/sh", "-c" with user input.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      // exec.Command with sh -c or bash -c
+      if (/exec\.Command\s*\(/.test(line) && /(sh|bash|cmd)/.test(line)) return true;
+      // exec.Command with fmt.Sprintf
+      if (/exec\.Command\s*\(\s*fmt\.Sprintf/.test(line)) return true;
+      // exec.CommandContext with shell
+      if (/exec\.CommandContext\s*\(/.test(line) && /(sh|bash|cmd)/.test(line)) return true;
+      return false;
+    },
+    guards: [/shellescape/i, /shlex/i, /safeCommand/i, /allowedCommands/i, /whitelist/i],
+  },
+  {
+    id: 'L1-019',
+    title: 'Go text/template used for HTML (XSS risk)',
+    layer: 'L1',
+    severity: 'high',
+    owasp: 'A03:2021 Injection',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'Go text/template does not escape HTML. If used to render web content, user input can inject arbitrary HTML/JavaScript (XSS).',
+    recommendation: 'Use html/template instead of text/template for any HTML output. html/template provides contextual auto-escaping.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      return /["']text\/template["']/.test(line);
+    },
+    guards: [/html\/template/, /template\.HTMLEscapeString/, /bluemonday/i, /sanitize/i],
+    contextCheck: (lines, idx) => {
+      const start = Math.max(0, idx - 10);
+      const end = Math.min(lines.length - 1, idx + 10);
+      for (let i = start; i <= end; i++) {
+        if (/\b(html|HTML|web|http|response|ResponseWriter|ServeHTTP)\b/.test(lines[i])) return true;
+      }
+      return false;
+    },
+  },
+  {
+    id: 'L1-020',
+    title: 'Go SQL query with fmt.Sprintf (injection risk)',
+    layer: 'L1',
+    severity: 'critical',
+    owasp: 'A03:2021 Injection',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'Building SQL queries with fmt.Sprintf or string concatenation in Go allows SQL injection when user input is interpolated.',
+    recommendation: 'Use parameterized queries: db.Query("SELECT * FROM t WHERE id = $1", id). Use sqlx or GORM query builders for complex queries.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      // db.Query/Exec/QueryRow with fmt.Sprintf
+      if (/\.(Query|Exec|QueryRow|QueryContext|ExecContext)\s*\(\s*fmt\.Sprintf/.test(line)) return true;
+      // db.Query with string concat (+)
+      if (/\.(Query|Exec|QueryRow)\s*\(.*\+/.test(line) && /SELECT|INSERT|UPDATE|DELETE|WHERE/i.test(line)) return true;
+      return false;
+    },
+    guards: [/\$\d/, /\?\s*,/, /squirrel/i, /sqlx\.Named/i, /Prepare\s*\(/, /parameterized/i],
+  },
+  {
+    id: 'L1-021',
+    title: 'Go TLS InsecureSkipVerify enabled',
+    layer: 'L1',
+    severity: 'high',
+    owasp: 'A02:2021 Cryptographic Failures',
+    nis2: 'Art. 21(2)(h) — Cryptography and encryption',
+    description: 'Setting InsecureSkipVerify: true disables TLS certificate validation, enabling man-in-the-middle attacks on all outbound HTTPS connections.',
+    recommendation: 'Remove InsecureSkipVerify: true. Use proper CA certificates. If using self-signed certs in development, restrict via build tags or environment checks.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      return /InsecureSkipVerify\s*:\s*true/.test(line);
+    },
+    guards: [/development/i, /testing/i, /\.env/i, /os\.Getenv/],
+  },
+  {
+    id: 'L1-022',
+    title: 'Go CORS wildcard (rs/cors or manual header)',
+    layer: 'L1',
+    severity: 'high',
+    owasp: 'A05:2021 Security Misconfiguration',
+    nis2: 'Art. 21(2)(d) — Network security',
+    description: 'Setting AllowedOrigins to ["*"] or AllowAll() in Go CORS middleware allows any website to make cross-origin requests.',
+    recommendation: 'Restrict AllowedOrigins to specific trusted domains. Use cors.Options{AllowedOrigins: []string{"https://app.example.com"}}.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      // cors.AllowAll() or cors.Default()
+      if (/cors\.(AllowAll|Default)\s*\(/.test(line)) return true;
+      // AllowedOrigins: []string{"*"}
+      if (/AllowedOrigins.*\*/.test(line)) return true;
+      // Manual header set
+      if (/Set.*Header.*Access-Control-Allow-Origin.*\*/.test(line)) return true;
+      return false;
+    },
+    guards: [/AllowedOrigins.*https?:/, /isAllowedOrigin/i, /originValidator/i],
   },
 ];
 
@@ -646,6 +745,10 @@ const L2_RULES = [
       if (/createHash\s*\(\s*['"`](md5|sha-?1)['"`]\s*\)/i.test(line)) return true;
       // Python: hashlib.md5( or hashlib.sha1(
       if (/hashlib\.(md5|sha1)\s*\(/.test(line)) return true;
+      // Go: md5.New(), md5.Sum(), sha1.New(), sha1.Sum()
+      if (/\b(md5|sha1)\.(New|Sum)\s*\(/.test(line)) return true;
+      // Go: import "crypto/md5" or "crypto/sha1"
+      if (/["']crypto\/(md5|sha1)["']/.test(line)) return true;
       // Direct MD5/SHA1 function calls
       if (/\b(md5|sha1)\s*\(/i.test(line) && !/^\s*(import|require|const|let|var|from)\b/.test(line)) return true;
       return false;
@@ -695,7 +798,7 @@ const L2_NEGATIVE_RULES = [
     nis2: 'Art. 21(2)(c) — Access control policies',
     description: 'No authentication mechanism was found in the codebase. MCP servers should authenticate clients to prevent unauthorized access.',
     recommendation: 'Implement authentication using JWT, OAuth, API keys, or another mechanism appropriate for your transport.',
-    pattern: /\b(auth|authenticate|requireAuth|jwt|oauth|bearer|api[-_]?key|apiKey|token.*verify|verifyToken|passport|session|login|BearerAuthBackend|RequireAuthMiddleware|TokenVerifier|AuthConfig|google\.oauth2)\b/i,
+    pattern: /\b(auth|authenticate|requireAuth|jwt|oauth|bearer|api[-_]?key|apiKey|token.*verify|verifyToken|passport|session|login|BearerAuthBackend|RequireAuthMiddleware|TokenVerifier|AuthConfig|google\.oauth2|AuthMiddleware|jwtauth|go-jwt|casbin)\b/i,
   },
   {
     id: 'L2-003',
@@ -1074,9 +1177,9 @@ function runL0Discovery(repoPath, allContent, sourceFiles) {
 
   // Detect transports
   const transportPatterns = [
-    { name: 'stdio', pattern: /\b(stdio|StdioServerTransport|stdio_server)\b/ },
-    { name: 'SSE', pattern: /\b(SSEServerTransport|SseServerTransport|sse)\b/i },
-    { name: 'Streamable HTTP', pattern: /\b(StreamableHTTPServerTransport|httpStream|streamable.http)\b/ },
+    { name: 'stdio', pattern: /\b(stdio|StdioServerTransport|stdio_server|NewStdioServer|server\.ServeStdio)\b/ },
+    { name: 'SSE', pattern: /\b(SSEServerTransport|SseServerTransport|sse|NewSSEServer|SSEHandler)\b/i },
+    { name: 'Streamable HTTP', pattern: /\b(StreamableHTTPServerTransport|httpStream|streamable.http|StreamableHTTP)\b/ },
   ];
   for (const tp of transportPatterns) {
     if (tp.pattern.test(allContent)) {
@@ -1096,6 +1199,9 @@ function runL0Discovery(repoPath, allContent, sourceFiles) {
     /@\w+\.tool\s*\(/g,                // Python FastMCP decorator
     /@server\.call_tool\s*\(/g,         // Python low-level MCP
     /@server\.list_tools\s*\(/g,        // Python low-level MCP
+    /AddTool\s*\(/g,                    // Go mcp-go
+    /NewTool\s*\(/g,                    // Go mcp-go
+    /server\.HandleFunc\s*\(/g,         // Go MCP handler
   ];
   let maxToolCount = 0;
   for (const tp of toolPatterns) {
@@ -1107,7 +1213,7 @@ function runL0Discovery(repoPath, allContent, sourceFiles) {
   discovery.toolCount = maxToolCount;
 
   // Dependency pinning
-  const lockFiles = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'requirements.txt', 'poetry.lock'];
+  const lockFiles = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'requirements.txt', 'poetry.lock', 'go.sum'];
   for (const lf of lockFiles) {
     if (fs.existsSync(path.join(repoPath, lf))) {
       discovery.hasDependencyPinning = true;
@@ -1174,6 +1280,30 @@ function runL0Discovery(repoPath, allContent, sourceFiles) {
       discovery.hasDependencyPinning = true;
       break;
     }
+  }
+
+  // Go go.mod dependencies
+  const goModPath = path.join(repoPath, 'go.mod');
+  if (fs.existsSync(goModPath) && !discovery.dependencyFile) {
+    try {
+      const content = fs.readFileSync(goModPath, 'utf-8');
+      const deps = [];
+      const requireBlock = content.match(/require\s*\(([\s\S]*?)\)/);
+      if (requireBlock) {
+        for (const line of requireBlock[1].split('\n')) {
+          const m = line.trim().match(/^(\S+)\s+(\S+)/);
+          if (m && !m[1].startsWith('//')) deps.push(`${m[1]}@${m[2]}`);
+        }
+      }
+      // Single-line require (not followed by opening paren)
+      for (const m of content.matchAll(/require\s+(\S+)\s+(v\S+)/g)) {
+        if (!deps.some(d => d.startsWith(m[1]))) deps.push(`${m[1]}@${m[2]}`);
+      }
+      if (deps.length > 0) {
+        discovery.dependencies = deps;
+        discovery.dependencyFile = 'go.mod';
+      }
+    } catch { /* skip */ }
   }
 
   return discovery;

@@ -1,8 +1,8 @@
 # compuute-scan
 
-**Static security scanner for MCP servers. Zero dependencies. OWASP LLM Top 10 + NIS2 mapped.**
+**Static security scanner for MCP servers. Covers 81% of the MCP ecosystem (TypeScript, JavaScript, Python, Go). Zero dependencies. OWASP Top 10 + NIS2 + GDPR + DORA mapped.**
 
-[![Version](https://img.shields.io/badge/version-0.2.0-blue)](#)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue)](#)
 [![License](https://img.shields.io/badge/license-MIT-green)](#license)
 [![CI](https://github.com/Compuute/compuute-scan/actions/workflows/ci.yml/badge.svg)](https://github.com/Compuute/compuute-scan/actions/workflows/ci.yml)
 
@@ -10,7 +10,9 @@
 
 ## What It Does
 
-`compuute-scan` analyzes MCP (Model Context Protocol) server source code for security vulnerabilities before deployment. It runs fully offline, requires no API keys, and produces audit-ready reports mapped to **OWASP LLM Top 10**, **NIS2 Art. 21**, and **DORA** compliance frameworks.
+`compuute-scan` analyzes MCP (Model Context Protocol) server source code for security vulnerabilities before deployment. It runs fully offline, requires no API keys, and produces audit-ready reports mapped to **OWASP Top 10 (2021)**, **NIS2 Art. 21**, **GDPR Art. 5/25**, and **DORA** compliance frameworks.
+
+**Supports TypeScript, JavaScript, Python, and Go** — covering ~81% of the MCP server ecosystem (based on 11,720+ GitHub repos, April 2026).
 
 ## Quick Start
 
@@ -47,15 +49,32 @@ docker compose build
 
 ## What It Scans
 
-**28 rules across 5 VIGIL security layers:**
+**49 rules across 5 VIGIL security layers:**
 
 | Layer | Focus | Rules | Examples |
 |-------|-------|-------|----------|
-| **L0** | Discovery | Metadata | Transport detection, tool inventory, dependency pinning |
-| **L1** | Sandboxing | 9 | `eval()`, `child_process`, path traversal, `0.0.0.0` binding, dynamic imports |
-| **L2** | Authorization | 4 | Hardcoded secrets, JWT expiry, missing auth/RBAC |
-| **L3** | Tool Integrity | 9 | SSRF, SQL injection, prompt injection in tool metadata, supply chain (npm hooks, unpinned git deps) |
+| **L0** | Discovery | Metadata | Transport detection (stdio/SSE/HTTP), tool inventory, dependency pinning, go.mod/pyproject.toml parsing |
+| **L1** | Sandboxing | 22 | `eval()`, `exec.Command`, `pickle.loads`, `yaml.load`, path traversal, CORS wildcards, SSL bypass, insecure random |
+| **L2** | Authorization | 11 | Hardcoded secrets/DB strings, JWT expiry/verify bypass, missing auth/RBAC, PII storage/logging, weak crypto (MD5/SHA1), data retention |
+| **L3** | Tool Integrity | 10 | SSRF, SQL injection (JS/Python f-string/Go fmt.Sprintf), prompt injection, PII in responses, supply chain |
 | **L4** | Monitoring | 6 | Missing audit logs, rate limiting, error leakage, ReDoS patterns |
+
+### Language-Specific Rules
+
+| Language | Ecosystem Share | Key Detections |
+|---|---|---|
+| **TypeScript/JS** | 40% | eval, child_process, CORS, SSRF, npm hooks, unpinned git deps |
+| **Python** | 35% | pickle, YAML unsafe load, f-string SQL injection, Starlette CORS, hashlib, verify=False |
+| **Go** | 6% | exec.Command+sh, fmt.Sprintf SQL, InsecureSkipVerify, text/template XSS, rs/cors wildcard |
+
+### Compliance Coverage
+
+| Framework | Coverage |
+|---|---|
+| **OWASP Top 10 (2021)** | **10/10** — all categories |
+| **NIS2 Art. 21(2)** | **7/7** technical (a/b/i are organisational) |
+| **GDPR** | **6/6** technical — Art. 5(1)(b)(c)(e)(f), Art. 25, Art. 32 |
+| **DORA** | **4/7** — Art. 5-6, 8-9, 28 (remainder is process/runtime) |
 
 ### Guard Detection
 
@@ -63,7 +82,7 @@ The scanner checks a **±15-line window** around each finding for mitigation pat
 
 ### Negative Checks
 
-Detects the **absence** of security controls across the entire codebase: no authentication, no RBAC, no audit logging, no rate limiting. Architectural risks that pattern matching alone won't catch.
+Detects the **absence** of security controls across the entire codebase: no authentication, no RBAC, no PII redaction, no input validation (zod/pydantic), no security headers (helmet), no audit logging, no rate limiting. Architectural risks that pattern matching alone won't catch.
 
 ## Example: Official MCP Servers Audit
 
@@ -152,11 +171,16 @@ Rules are defined as objects in `compuute-scan.js`:
   severity: 'high',
   owasp: 'A03:2021 Injection',
   nis2: 'Art. 21(2)(e)',
+  gdpr: 'Art. 5(1)(c) — Data minimisation',  // optional
+  dora: 'Art. 6(8) — Data integrity',         // optional
   description: 'What the rule detects',
   recommendation: 'How to fix it',
   test: (line) => /pattern/.test(line),
   guards: [/mitigationPattern/],
 }
+```
+
+See [ROADMAP.md](ROADMAP.md) for planned features and language support timeline.
 ```
 
 ## Testing
