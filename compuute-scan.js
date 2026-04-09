@@ -348,6 +348,42 @@ const L1_RULES = [
     },
     guards: [/allowlist/i, /whitelist/i, /allowedModules/i, /safeRequire/i, /validateModule/i],
   },
+  {
+    id: 'L1-010',
+    title: 'Wildcard CORS origin (Access-Control-Allow-Origin: *)',
+    layer: 'L1',
+    severity: 'high',
+    owasp: 'A05:2021 Security Misconfiguration',
+    nis2: 'Art. 21(2)(d) — Network security',
+    description: 'Setting Access-Control-Allow-Origin to "*" allows any website to make cross-origin requests to this MCP server. Combined with credentials, this enables cross-site data theft.',
+    recommendation: 'Restrict CORS to specific trusted origins. Never use wildcard CORS on authenticated endpoints. Use an allowlist of permitted origins.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*#/.test(line)) return false;
+      // cors({ origin: '*' }) or cors() with no args (defaults to *)
+      if (/\bcors\s*\(\s*\)/.test(line)) return true;
+      if (/origin\s*[:=]\s*['"`]\*['"`]/.test(line)) return true;
+      // Access-Control-Allow-Origin header set to *
+      if (/['"`]Access-Control-Allow-Origin['"`]\s*,\s*['"`]\*['"`]/.test(line)) return true;
+      if (/['"]\*['"]\s*\)/.test(line) && /setHeader|header\s*\(/.test(line) && /Access.Control.Allow.Origin/.test(line)) return true;
+      return false;
+    },
+    guards: [/allowedOrigins/i, /originWhitelist/i, /corsOptions/i, /origin.*!==.*\*/, /validateOrigin/i],
+  },
+];
+
+// Negative check rules for L1 (whole-codebase checks)
+const L1_NEGATIVE_RULES = [
+  {
+    id: 'L1-011',
+    title: 'No security headers middleware detected',
+    layer: 'L1',
+    severity: 'medium',
+    owasp: 'A05:2021 Security Misconfiguration',
+    nis2: 'Art. 21(2)(d) — Network security',
+    description: 'No security headers middleware (helmet, secure-headers) or manual security header configuration was detected. HTTP-exposed MCP servers should set Content-Security-Policy, X-Content-Type-Options, Strict-Transport-Security, and other protective headers.',
+    recommendation: 'Add helmet (Node.js) or secure-headers middleware. At minimum set: Content-Security-Policy, X-Content-Type-Options: nosniff, Strict-Transport-Security, X-Frame-Options: DENY.',
+    pattern: /\b(helmet|secureHeaders|secure.headers|Content-Security-Policy|X-Content-Type-Options|Strict-Transport-Security|X-Frame-Options|nosniff)\b/i,
+  },
 ];
 
 // ─────────────────────────────────────────────
@@ -437,6 +473,57 @@ const L2_RULES = [
       return hasPiiField && hasLog;
     },
     guards: [/redact/i, /mask/i, /sanitize/i, /\*{3,}/, /pii/i, /scrub/i],
+  },
+  {
+    id: 'L2-008',
+    title: 'Weak cryptographic hash used for security purpose',
+    layer: 'L2',
+    severity: 'high',
+    owasp: 'A02:2021 Cryptographic Failures',
+    nis2: 'Art. 21(2)(h) — Cryptography and encryption',
+    description: 'MD5 and SHA-1 are cryptographically broken. Using them for password hashing, token generation, or integrity checks enables collision and preimage attacks.',
+    recommendation: 'Use SHA-256/SHA-3 for integrity checks. Use bcrypt, scrypt, or argon2 for password hashing. Never use MD5 or SHA-1 for any security-relevant purpose.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*#/.test(line)) return false;
+      // Node.js: createHash('md5') or createHash('sha1')
+      if (/createHash\s*\(\s*['"`](md5|sha-?1)['"`]\s*\)/i.test(line)) return true;
+      // Python: hashlib.md5( or hashlib.sha1(
+      if (/hashlib\.(md5|sha1)\s*\(/.test(line)) return true;
+      // Direct MD5/SHA1 function calls
+      if (/\b(md5|sha1)\s*\(/i.test(line) && !/^\s*(import|require|const|let|var|from)\b/.test(line)) return true;
+      return false;
+    },
+    guards: [/sha256/i, /sha384/i, /sha512/i, /sha3/i, /bcrypt/i, /scrypt/i, /argon2/i, /pbkdf2/i, /checksum/i, /etag/i, /cache/i],
+  },
+  {
+    id: 'L2-009',
+    title: 'Data storage without TTL or retention policy',
+    layer: 'L2',
+    severity: 'medium',
+    owasp: 'A04:2021 Insecure Design',
+    nis2: 'Art. 21(2)(f) — Security in acquisition, development and maintenance',
+    dora: 'Art. 6(8) — Data integrity and confidentiality',
+    gdpr: 'Art. 5(1)(e) — Storage limitation',
+    description: 'Data is written to a database or file store without a TTL, expiry, or retention policy. GDPR Art. 5(1)(e) requires that personal data is kept only as long as necessary for the purpose.',
+    recommendation: 'Set a TTL or expiry on stored records. Implement a data retention policy with automatic cleanup (e.g., TTL indexes in MongoDB, EXPIRE in Redis, scheduled purge jobs).',
+    test: (line) => {
+      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*#/.test(line)) return false;
+      // Database insert/create/save operations
+      const hasDbWrite = /\.(save|create|insert|insertOne|insertMany|put|set|hset|rpush|lpush|sadd|zadd|write)\s*\(/.test(line);
+      // File-based persistence
+      const hasFileWrite = /\b(writeFile|writeFileSync|appendFile|appendFileSync)\s*\(/.test(line);
+      return hasDbWrite || hasFileWrite;
+    },
+    guards: [/ttl/i, /expir/i, /retention/i, /maxAge/i, /deleteAfter/i, /purge/i, /cleanup/i, /createdAt/i, /ttlIndex/i, /EXPIRE/],
+    // Only flag if it looks like persistent storage (near DB/model/store context)
+    contextCheck: (lines, idx) => {
+      const start = Math.max(0, idx - 10);
+      const end = Math.min(lines.length - 1, idx + 10);
+      for (let i = start; i <= end; i++) {
+        if (/\b(mongo|mongoose|sequelize|prisma|knex|redis|typeorm|drizzle|firebase|supabase|dynamodb|collection|model|repository|store|database|db)\b/i.test(lines[i])) return true;
+      }
+      return false;
+    },
   },
 ];
 
@@ -1317,7 +1404,7 @@ function main() {
   }
 
   // Run negative checks
-  const negativeRules = [...L2_NEGATIVE_RULES, ...L3_NEGATIVE_RULES, ...L4_NEGATIVE_RULES];
+  const negativeRules = [...L1_NEGATIVE_RULES, ...L2_NEGATIVE_RULES, ...L3_NEGATIVE_RULES, ...L4_NEGATIVE_RULES];
   findings.push(...runNegativeChecks(allContent, negativeRules));
 
   // L0 Discovery
