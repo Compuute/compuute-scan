@@ -14,9 +14,13 @@ export default function ScanResultPage() {
   const [showShare, setShowShare] = useState(false);
 
   useEffect(() => {
-    const stored = sessionStorage.getItem(`scan-${id}`);
-    if (stored) {
-      setResult(JSON.parse(stored));
+    try {
+      const stored = sessionStorage.getItem(`scan-${id}`);
+      if (stored) {
+        setResult(JSON.parse(stored));
+      }
+    } catch {
+      // Corrupted data — show "not found" state
     }
   }, [id]);
 

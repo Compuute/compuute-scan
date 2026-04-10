@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// compuute-scan v0.1.0 — MCP Server Security Scanner
-// Internal tool for Compuute AB | daniel@compuute.se
+// compuute-scan v0.3.0 — MCP Server Security Scanner
+// Compuute AB | daniel@compuute.se
 // Zero external dependencies. Node.js built-ins only.
 
 'use strict';
