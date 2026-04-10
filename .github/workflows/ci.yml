@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20, 22]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Integrity verification
+        run: node verify-integrity.js --audit-only
+
+      - name: Unit tests
+        run: node death-by-mcp/test.js
+
+      - name: Self-scan (JSON)
+        run: node compuute-scan.js . --json --fail-on-severity critical 2>/dev/null > /dev/null
+
+      - name: Self-scan (SARIF valid JSON)
+        run: node compuute-scan.js . --sarif 2>/dev/null | node -e "JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8'))"
+
+      - name: Self-scan (Markdown)
+        run: node compuute-scan.js . 2>/dev/null > /dev/null

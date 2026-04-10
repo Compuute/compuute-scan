@@ -242,6 +242,68 @@ assert('Rate limit: different IP allowed',
   otherIp.allowed === true);
 
 // ─────────────────────────────────────────────
+// Inline Ignore
+// ─────────────────────────────────────────────
+
+console.log('\n=== Inline Ignore ===');
+
+const IGNORE_PATTERN = /(?:\/\/|#)\s*compuute-scan-ignore-next-line(?:\s+(L\d+-\d+))?/;
+
+assert('Ignore: JS comment matches',
+  IGNORE_PATTERN.test('// compuute-scan-ignore-next-line'));
+assert('Ignore: JS comment with rule ID',
+  IGNORE_PATTERN.exec('// compuute-scan-ignore-next-line L1-006')[1] === 'L1-006');
+assert('Ignore: Python comment matches',
+  IGNORE_PATTERN.test('# compuute-scan-ignore-next-line'));
+assert('Ignore: Python comment with rule ID',
+  IGNORE_PATTERN.exec('# compuute-scan-ignore-next-line L1-014')[1] === 'L1-014');
+assert('Ignore: indented comment matches',
+  IGNORE_PATTERN.test('    // compuute-scan-ignore-next-line'));
+assert('Ignore: wrong prefix does not match',
+  !IGNORE_PATTERN.test('/* compuute-scan-ignore-next-line */'));
+assert('Ignore: partial text does not match',
+  !IGNORE_PATTERN.test('// compuute-scan-ignore'));
+
+// ─────────────────────────────────────────────
+// Config File
+// ─────────────────────────────────────────────
+
+console.log('\n=== Config File ===');
+
+// Simulate shouldIgnoreFile logic
+function shouldIgnoreFile(relPath, config) {
+  if (!config || !config.ignore || !Array.isArray(config.ignore)) return false;
+  for (const pattern of config.ignore) {
+    const re = new RegExp(
+      '^' + pattern
+        .replace(/\./g, '\\.')
+        .replace(/\*\*/g, '(.+)')
+        .replace(/\*/g, '([^/]+)')
+      + '$'
+    );
+    if (re.test(relPath)) return true;
+  }
+  return false;
+}
+
+const testConfig = { ignore: ['test/**', 'examples/**', '*.test.js'] };
+
+assert('Config ignore: test/foo.js matched by test/**',
+  shouldIgnoreFile('test/foo.js', testConfig));
+assert('Config ignore: test/deep/bar.ts matched by test/**',
+  shouldIgnoreFile('test/deep/bar.ts', testConfig));
+assert('Config ignore: examples/demo.py matched',
+  shouldIgnoreFile('examples/demo.py', testConfig));
+assert('Config ignore: app.test.js matched by *.test.js',
+  shouldIgnoreFile('app.test.js', testConfig));
+assert('Config ignore: src/index.js NOT matched',
+  !shouldIgnoreFile('src/index.js', testConfig));
+assert('Config ignore: null config returns false',
+  !shouldIgnoreFile('test/foo.js', null));
+assert('Config ignore: empty ignore array returns false',
+  !shouldIgnoreFile('test/foo.js', { ignore: [] }));
+
+// ─────────────────────────────────────────────
 // Summary
 // ─────────────────────────────────────────────
 

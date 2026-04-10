@@ -1,15 +1,16 @@
 {
   "name": "compuute-scan",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Static security scanner for MCP servers. Covers 81% of the MCP ecosystem (TS/JS/Python/Go). Zero dependencies. OWASP + NIS2 + GDPR + DORA mapped.",
   "main": "compuute-scan.js",
   "bin": {
     "compuute-scan": "./compuute-scan.js"
   },
   "scripts": {
-    "test": "bash test.sh",
+    "test": "node death-by-mcp/test.js",
     "verify": "node verify-integrity.js",
-    "verify:hash": "node verify-integrity.js --hash"
+    "verify:hash": "node verify-integrity.js --hash",
+    "prepublishOnly": "node verify-integrity.js --audit-only && node death-by-mcp/test.js"
   },
   "keywords": ["mcp", "security", "scanner", "owasp", "nis2", "dora", "gdpr", "audit", "pii", "python", "golang", "typescript"],
   "author": "Compuute AB",
