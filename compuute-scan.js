@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// compuute-scan v0.1.0 — MCP Server Security Scanner
-// Internal tool for Compuute AB | daniel@compuute.se
+// compuute-scan v0.3.0 — MCP Server Security Scanner
+// Compuute AB | daniel@compuute.se
 // Zero external dependencies. Node.js built-ins only.
 
 'use strict';
@@ -953,10 +953,11 @@ function generateMarkdownReport(repoPath, findings, discovery, durationMs) {
   // Layer Assessment
   md += `## Layer Assessment\n\n`;
   md += `| Layer | Status | Findings | Description |\n|-------|--------|----------|-------------|\n`;
-  for (const l of ['L0', 'L1', 'L2', 'L3', 'L4']) {
+  for (const l of ['L0', 'L1']) {
     const count = layers[l] || 0;
     md += `| ${l} | ${layerEmoji(count)} | ${count} | ${layerDescriptions[l]} |\n`;
   }
+  md += `| L2-L4 | — | — | [Available in Compuute Professional Audit](https://compuute.se/audit) |\n`;
   md += '\n';
 
   // Detailed Findings (grouped by severity)
