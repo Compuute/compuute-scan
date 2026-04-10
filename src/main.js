@@ -70,6 +70,9 @@ function main() {
   // L0 Discovery
   const discovery = runL0Discovery(repoPath, allContent, sourceFiles);
 
+  // Dependency checks (CVE, age, license)
+  findings.push(...runDependencyChecks(repoPath, discovery));
+
   const durationMs = Date.now() - startTime;
 
   // Apply filters

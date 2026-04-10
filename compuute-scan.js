@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// compuute-scan v0.5.0 — MCP Server Security Scanner
+// compuute-scan v0.6.0 — MCP Server Security Scanner
 // Compuute AB | daniel@compuute.se
 // Zero external dependencies. Node.js built-ins only.
 //
@@ -16,18 +16,20 @@ const path = require('path');
 // Constants
 // ─────────────────────────────────────────────
 
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 const MAX_FILE_SIZE = 500 * 1024; // 500 KB
 const MAX_CODE_SNIPPET = 120; // max characters in code/guardCode snippets
 const GUARD_WINDOW = 15; // lines above/below to check for guards
 
 const SCAN_EXTENSIONS = new Set([
   '.ts', '.js', '.py', '.mjs', '.cjs', '.tsx', '.jsx', '.go', '.rs',
+  '.cs', '.java', '.kt',
 ]);
 
 const SKIP_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', '__pycache__',
   'coverage', '.turbo', '.next', '.venv', 'venv', 'vendor',
+  'bin', 'obj', 'target', '.gradle',
 ]);
 
 const SEVERITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
@@ -798,6 +800,191 @@ const L1_RULES = [
     },
     guards: [/development/i, /testing/i, /cfg!\s*\(\s*debug_assertions/, /cfg!\s*\(\s*test/],
   },
+
+  // ─── C#/.NET Rules ───
+
+  {
+    id: 'L1-028',
+    title: 'C# Process.Start with user input',
+    layer: 'L1',
+    severity: 'critical',
+    owasp: 'A03:2021 Injection',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'Process.Start() executes external programs. If the arguments include user-controlled input, an attacker can execute arbitrary commands.',
+    recommendation: 'Avoid passing user input to Process.Start(). Use an allowlist of permitted commands and validate arguments. Never use shell execution (UseShellExecute = true) with user input.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      // Process.Start with variable (not just literal)
+      if (/Process\.Start\s*\(/.test(line)) return true;
+      // ProcessStartInfo with FileName from variable
+      if (/FileName\s*=\s*[^"']/.test(line) && /ProcessStartInfo/.test(line)) return true;
+      return false;
+    },
+    guards: [/allowlist/i, /whitelist/i, /UseShellExecute\s*=\s*false/, /ValidateCommand/i],
+  },
+  {
+    id: 'L1-029',
+    title: 'C# SQL string concatenation (SqlCommand)',
+    layer: 'L1',
+    severity: 'critical',
+    owasp: 'A03:2021 Injection',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'Building SQL queries with string concatenation or interpolation in SqlCommand enables SQL injection.',
+    recommendation: 'Use parameterized queries: new SqlCommand("SELECT * FROM t WHERE id = @id", conn) with cmd.Parameters.AddWithValue("@id", id).',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      // new SqlCommand("..." + var) or SqlCommand($"...")
+      if (/SqlCommand\s*\(\s*\$"/.test(line)) return true;
+      if (/SqlCommand\s*\(\s*".*\+/.test(line)) return true;
+      // CommandText = $"..." or "..." +
+      if (/CommandText\s*=\s*\$"/.test(line) && /SELECT|INSERT|UPDATE|DELETE|WHERE/i.test(line)) return true;
+      if (/CommandText\s*=\s*".*\+/.test(line) && /SELECT|INSERT|UPDATE|DELETE|WHERE/i.test(line)) return true;
+      return false;
+    },
+    guards: [/Parameters\.Add/, /SqlParameter/, /parameterized/i, /@\w+/],
+  },
+  {
+    id: 'L1-030',
+    title: 'C# [AllowAnonymous] on sensitive endpoint',
+    layer: 'L1',
+    severity: 'high',
+    owasp: 'A01:2021 Broken Access Control',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: '[AllowAnonymous] bypasses authentication on the decorated endpoint. If applied to sensitive endpoints, unauthenticated users can access protected resources.',
+    recommendation: 'Review all [AllowAnonymous] usages. Only apply to truly public endpoints (login, health check). Prefer [Authorize] as the default and explicitly mark exceptions.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      return /\[AllowAnonymous\]/.test(line);
+    },
+    guards: [/\[Authorize\]/, /\[Authorize\(/, /RequireAuthorization/, /IsAuthenticated/],
+  },
+  {
+    id: 'L1-031',
+    title: 'C# deserialization of untrusted data',
+    layer: 'L1',
+    severity: 'critical',
+    owasp: 'A08:2021 Software and Data Integrity Failures',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'BinaryFormatter, SoapFormatter, and ObjectStateFormatter deserialize arbitrary .NET types and can execute code during deserialization. These are banned by Microsoft.',
+    recommendation: 'Use System.Text.Json or JsonSerializer instead. Never use BinaryFormatter — it is obsolete and dangerous. If binary serialization is required, use MessagePack or protobuf.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      return /\b(BinaryFormatter|SoapFormatter|ObjectStateFormatter|LosFormatter|NetDataContractSerializer)\b/.test(line);
+    },
+    guards: [/System\.Text\.Json/, /JsonSerializer/, /JsonConvert/],
+  },
+  {
+    id: 'L1-032',
+    title: 'C# CORS AllowAnyOrigin',
+    layer: 'L1',
+    severity: 'high',
+    owasp: 'A05:2021 Security Misconfiguration',
+    nis2: 'Art. 21(2)(d) — Network security',
+    description: 'AllowAnyOrigin() in ASP.NET Core CORS policy allows any website to make cross-origin requests.',
+    recommendation: 'Use WithOrigins("https://specific-domain.com") instead of AllowAnyOrigin(). Never combine AllowAnyOrigin with AllowCredentials.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      return /\.AllowAnyOrigin\s*\(/.test(line);
+    },
+    guards: [/\.WithOrigins\s*\(/, /AllowedOrigins/i],
+  },
+
+  // ─── Java/Kotlin Rules ───
+
+  {
+    id: 'L1-033',
+    title: 'Java Runtime.exec() command execution',
+    layer: 'L1',
+    severity: 'critical',
+    owasp: 'A03:2021 Injection',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'Runtime.getRuntime().exec() executes system commands. If user input is concatenated into the command string, it enables command injection.',
+    recommendation: 'Use ProcessBuilder with explicit argument lists instead. Never concatenate user input into command strings. Validate input against an allowlist.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      // Runtime.getRuntime().exec(
+      if (/Runtime\.getRuntime\s*\(\s*\)\.exec\s*\(/.test(line)) return true;
+      // ProcessBuilder with string concat or shell
+      if (/ProcessBuilder\s*\(/.test(line) && /\+/.test(line)) return true;
+      // Kotlin: Runtime.getRuntime().exec
+      if (/runtime\s*\(\s*\)\.exec\s*\(/i.test(line)) return true;
+      return false;
+    },
+    guards: [/ProcessBuilder/, /allowlist/i, /whitelist/i, /validateCommand/i],
+  },
+  {
+    id: 'L1-034',
+    title: 'Java/Kotlin SQL string concatenation (JDBC)',
+    layer: 'L1',
+    severity: 'critical',
+    owasp: 'A03:2021 Injection',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'Building SQL queries with string concatenation in JDBC Statement enables SQL injection.',
+    recommendation: 'Use PreparedStatement with parameterized queries: conn.prepareStatement("SELECT * FROM t WHERE id = ?") and ps.setString(1, id).',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      // executeQuery("..." + var) or executeUpdate("..." + var)
+      if (/\.(executeQuery|executeUpdate|execute)\s*\(\s*".*\+/.test(line)) return true;
+      // Statement.execute with string concat
+      if (/\.(executeQuery|executeUpdate|execute)\s*\(\s*[a-zA-Z]/.test(line) && !/PreparedStatement/.test(line)) return true;
+      // Kotlin string template in SQL
+      if (/\.(executeQuery|executeUpdate|execute)\s*\(\s*".*\$\{/.test(line)) return true;
+      return false;
+    },
+    guards: [/PreparedStatement/, /prepareStatement/, /setString/, /setInt/, /NamedParameterJdbc/i, /JpaRepository/i],
+  },
+  {
+    id: 'L1-035',
+    title: 'Java ObjectInputStream deserialization',
+    layer: 'L1',
+    severity: 'critical',
+    owasp: 'A08:2021 Software and Data Integrity Failures',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'ObjectInputStream.readObject() deserializes arbitrary Java objects and can execute code via gadget chains. This is the root cause of most Java deserialization CVEs.',
+    recommendation: 'Avoid Java native serialization. Use JSON (Jackson/Gson) or protobuf. If unavoidable, use an ObjectInputFilter (JEP 290) to restrict allowed classes.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      // ObjectInputStream or readObject()
+      if (/new\s+ObjectInputStream\s*\(/.test(line)) return true;
+      if (/\.readObject\s*\(/.test(line) && !/JsonReader|XmlReader|DataReader/.test(line)) return true;
+      return false;
+    },
+    guards: [/ObjectInputFilter/, /JEP.290/i, /ValidatingObjectInputStream/, /SerialKiller/i, /Jackson/, /Gson/],
+  },
+  {
+    id: 'L1-036',
+    title: 'Spring Security permitAll on sensitive path',
+    layer: 'L1',
+    severity: 'high',
+    owasp: 'A01:2021 Broken Access Control',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'permitAll() in Spring Security configuration disables authentication for the matched endpoints. If applied too broadly, it exposes protected resources.',
+    recommendation: 'Review all permitAll() usages. Apply only to public endpoints (login, health, static). Use authenticated() or hasRole() as the default.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      return /\.permitAll\s*\(/.test(line);
+    },
+    guards: [/\.authenticated\s*\(/, /\.hasRole\s*\(/, /\.hasAuthority\s*\(/, /\.denyAll\s*\(/],
+  },
+  {
+    id: 'L1-037',
+    title: 'Java/Kotlin CORS @CrossOrigin wildcard',
+    layer: 'L1',
+    severity: 'high',
+    owasp: 'A05:2021 Security Misconfiguration',
+    nis2: 'Art. 21(2)(d) — Network security',
+    description: '@CrossOrigin without explicit origins or with origins="*" allows any website to make cross-origin requests.',
+    recommendation: 'Specify explicit allowed origins: @CrossOrigin(origins = "https://app.example.com"). Configure CORS centrally via WebMvcConfigurer.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      // @CrossOrigin without origins or with "*"
+      if (/@CrossOrigin\s*$/.test(line.trim())) return true;
+      if (/@CrossOrigin\s*\(\s*\)/.test(line)) return true;
+      if (/@CrossOrigin\s*\(.*origins\s*=\s*"\*"/.test(line)) return true;
+      return false;
+    },
+    guards: [/origins\s*=\s*"https?:/, /allowedOrigins.*https?:/i, /CorsConfiguration/],
+  },
 ];
 
 // Negative check rules for L1 (whole-codebase checks)
@@ -1024,9 +1211,506 @@ function runL0Discovery(repoPath, allContent, sourceFiles) {
     }
   }
 
+  // C#/.NET .csproj dependencies
+  const csprojFiles = sourceFiles.filter(f => f.endsWith('.cs'));
+  if (csprojFiles.length > 0 && !discovery.dependencyFile) {
+    // Look for *.csproj in repo root or one level deep
+    const csprojCandidates = [];
+    try {
+      for (const entry of fs.readdirSync(repoPath, { withFileTypes: true })) {
+        if (entry.isFile() && entry.name.endsWith('.csproj')) {
+          csprojCandidates.push(path.join(repoPath, entry.name));
+        } else if (entry.isDirectory() && !SKIP_DIRS.has(entry.name)) {
+          try {
+            for (const sub of fs.readdirSync(path.join(repoPath, entry.name), { withFileTypes: true })) {
+              if (sub.isFile() && sub.name.endsWith('.csproj')) {
+                csprojCandidates.push(path.join(repoPath, entry.name, sub.name));
+              }
+            }
+          } catch { /* skip unreadable */ }
+        }
+      }
+    } catch { /* skip */ }
+    if (csprojCandidates.length > 0) {
+      try {
+        const content = fs.readFileSync(csprojCandidates[0], 'utf-8');
+        const deps = [];
+        const pkgRefs = content.matchAll(/<PackageReference\s+Include="([^"]+)"\s+Version="([^"]+)"/g);
+        for (const m of pkgRefs) {
+          deps.push(`${m[1]}@${m[2]}`);
+        }
+        if (deps.length > 0) {
+          discovery.dependencies = deps;
+          discovery.dependencyFile = path.basename(csprojCandidates[0]);
+        }
+      } catch (err) {
+        console.error(`[warn] Failed to parse .csproj: ${err.message}`);
+      }
+    }
+  }
+
+  // Java pom.xml dependencies
+  const pomPath = path.join(repoPath, 'pom.xml');
+  if (fs.existsSync(pomPath) && !discovery.dependencyFile) {
+    try {
+      const content = fs.readFileSync(pomPath, 'utf-8');
+      const deps = [];
+      // Simple XML extraction for <dependency> blocks
+      const depBlocks = content.matchAll(/<dependency>\s*([\s\S]*?)<\/dependency>/g);
+      for (const block of depBlocks) {
+        const groupId = block[1].match(/<groupId>([^<]+)<\/groupId>/);
+        const artifactId = block[1].match(/<artifactId>([^<]+)<\/artifactId>/);
+        const version = block[1].match(/<version>([^<]+)<\/version>/);
+        if (groupId && artifactId) {
+          const ver = version ? `@${version[1]}` : '';
+          deps.push(`${groupId[1]}:${artifactId[1]}${ver}`);
+        }
+      }
+      if (deps.length > 0) {
+        discovery.dependencies = deps;
+        discovery.dependencyFile = 'pom.xml';
+      }
+    } catch (err) {
+      console.error(`[warn] Failed to parse pom.xml: ${err.message}`);
+    }
+  }
+
+  // Kotlin/Gradle build.gradle dependencies
+  const gradlePath = path.join(repoPath, 'build.gradle');
+  const gradleKtsPath = path.join(repoPath, 'build.gradle.kts');
+  const actualGradle = fs.existsSync(gradleKtsPath) ? gradleKtsPath : (fs.existsSync(gradlePath) ? gradlePath : null);
+  if (actualGradle && !discovery.dependencyFile) {
+    try {
+      const content = fs.readFileSync(actualGradle, 'utf-8');
+      const deps = [];
+      // implementation "group:artifact:version" or implementation("group:artifact:version")
+      const depPattern = /(?:implementation|api|compileOnly|runtimeOnly|testImplementation)\s*[\("]\s*['"]([^'"]+)['"]/g;
+      let m;
+      while ((m = depPattern.exec(content)) !== null) {
+        deps.push(m[1]);
+      }
+      if (deps.length > 0) {
+        discovery.dependencies = deps;
+        discovery.dependencyFile = path.basename(actualGradle);
+      }
+    } catch (err) {
+      console.error(`[warn] Failed to parse ${path.basename(actualGradle)}: ${err.message}`);
+    }
+  }
+
   return discovery;
 }
 
+
+
+
+// ─────────────────────────────────────────────
+// Dependency Checks: CVE, Age, License
+// ─────────────────────────────────────────────
+
+// Offline CVE database — curated list of known-vulnerable package versions.
+// Covers top npm/PyPI/Go packages with critical/high CVEs.
+// Format: { package: [{ version: semver-range, cve: id, severity: level, title: desc }] }
+const KNOWN_CVES = {
+  // npm
+  'lodash': [
+    { below: '4.17.21', cve: 'CVE-2021-23337', severity: 'critical', title: 'Command injection via template' },
+    { below: '4.17.19', cve: 'CVE-2020-8203', severity: 'high', title: 'Prototype pollution' },
+  ],
+  'axios': [
+    { below: '1.7.4', cve: 'CVE-2024-39338', severity: 'high', title: 'SSRF via unexpected absolute URL' },
+    { below: '1.6.0', cve: 'CVE-2023-45857', severity: 'medium', title: 'CSRF token exposure' },
+  ],
+  'express': [
+    { below: '4.20.0', cve: 'CVE-2024-43796', severity: 'medium', title: 'XSS via response.redirect' },
+    { below: '4.19.2', cve: 'CVE-2024-29041', severity: 'medium', title: 'Open redirect' },
+  ],
+  'jsonwebtoken': [
+    { below: '9.0.0', cve: 'CVE-2022-23529', severity: 'critical', title: 'Arbitrary code execution via secret object' },
+  ],
+  'node-fetch': [
+    { below: '2.6.7', cve: 'CVE-2022-0235', severity: 'high', title: 'Cookie leak to third-party' },
+  ],
+  'minimatch': [
+    { below: '3.0.5', cve: 'CVE-2022-3517', severity: 'high', title: 'ReDoS via brace expansion' },
+  ],
+  'semver': [
+    { below: '7.5.2', cve: 'CVE-2022-25883', severity: 'medium', title: 'ReDoS via long version string' },
+  ],
+  'tar': [
+    { below: '6.1.9', cve: 'CVE-2021-37712', severity: 'high', title: 'Arbitrary file creation via symlink' },
+  ],
+  'shell-quote': [
+    { below: '1.7.3', cve: 'CVE-2021-42740', severity: 'critical', title: 'Command injection' },
+  ],
+  'got': [
+    { below: '11.8.5', cve: 'CVE-2022-33987', severity: 'medium', title: 'Open redirect' },
+  ],
+  'qs': [
+    { below: '6.10.3', cve: 'CVE-2022-24999', severity: 'high', title: 'Prototype pollution' },
+  ],
+  'moment': [
+    { below: '2.29.4', cve: 'CVE-2022-31129', severity: 'high', title: 'ReDoS via date string' },
+  ],
+  'xml2js': [
+    { below: '0.5.0', cve: 'CVE-2023-0842', severity: 'medium', title: 'Prototype pollution' },
+  ],
+  'tough-cookie': [
+    { below: '4.1.3', cve: 'CVE-2023-26136', severity: 'medium', title: 'Prototype pollution' },
+  ],
+  'yaml': [
+    { below: '2.2.2', cve: 'CVE-2023-2251', severity: 'high', title: 'ReDoS via crafted YAML' },
+  ],
+  'fast-xml-parser': [
+    { below: '4.2.5', cve: 'CVE-2023-34104', severity: 'high', title: 'Prototype pollution' },
+  ],
+  'jose': [
+    { below: '4.11.4', cve: 'CVE-2024-28176', severity: 'medium', title: 'Denial of service via JWE' },
+  ],
+  'undici': [
+    { below: '5.28.4', cve: 'CVE-2024-30260', severity: 'medium', title: 'Cookie leak via HTTP redirect' },
+  ],
+  'path-to-regexp': [
+    { below: '0.1.10', cve: 'CVE-2024-45296', severity: 'high', title: 'ReDoS via backtracking' },
+  ],
+  'body-parser': [
+    { below: '1.20.3', cve: 'CVE-2024-45590', severity: 'high', title: 'Denial of service' },
+  ],
+
+  // PyPI
+  'requests': [
+    { below: '2.32.0', cve: 'CVE-2024-35195', severity: 'medium', title: 'Certificate verification bypass' },
+  ],
+  'django': [
+    { below: '4.2.16', cve: 'CVE-2024-45231', severity: 'medium', title: 'Information disclosure' },
+  ],
+  'flask': [
+    { below: '2.3.2', cve: 'CVE-2023-30861', severity: 'high', title: 'Session cookie leak' },
+  ],
+  'werkzeug': [
+    { below: '3.0.3', cve: 'CVE-2024-34069', severity: 'high', title: 'Remote code execution via debugger' },
+  ],
+  'jinja2': [
+    { below: '3.1.4', cve: 'CVE-2024-34064', severity: 'medium', title: 'XSS via xmlattr filter' },
+  ],
+  'cryptography': [
+    { below: '42.0.4', cve: 'CVE-2024-26130', severity: 'high', title: 'NULL pointer dereference in PKCS12' },
+  ],
+  'urllib3': [
+    { below: '2.0.7', cve: 'CVE-2023-45803', severity: 'medium', title: 'Cookie leak on redirect' },
+  ],
+  'pydantic': [
+    { below: '1.10.13', cve: 'CVE-2024-3772', severity: 'medium', title: 'ReDoS via email validation' },
+  ],
+  'pillow': [
+    { below: '10.3.0', cve: 'CVE-2024-28219', severity: 'high', title: 'Buffer overflow in TIFF' },
+  ],
+  'aiohttp': [
+    { below: '3.9.4', cve: 'CVE-2024-30251', severity: 'high', title: 'Denial of service' },
+  ],
+  'fastapi': [
+    { below: '0.109.1', cve: 'CVE-2024-24762', severity: 'medium', title: 'DoS via multipart form' },
+  ],
+  'starlette': [
+    { below: '0.36.2', cve: 'CVE-2024-24762', severity: 'medium', title: 'DoS via multipart form' },
+  ],
+  'sqlalchemy': [
+    { below: '2.0.0b1', cve: 'CVE-2023-1370', severity: 'medium', title: 'SQL injection via text clause' },
+  ],
+  'paramiko': [
+    { below: '3.4.0', cve: 'CVE-2023-48795', severity: 'medium', title: 'Terrapin SSH prefix truncation' },
+  ],
+  'certifi': [
+    { below: '2023.7.22', cve: 'CVE-2023-37920', severity: 'high', title: 'Removed e-Tugra root certificate' },
+  ],
+
+  // Go modules
+  'golang.org/x/crypto': [
+    { below: 'v0.17.0', cve: 'CVE-2023-48795', severity: 'medium', title: 'Terrapin SSH prefix truncation' },
+  ],
+  'golang.org/x/net': [
+    { below: 'v0.23.0', cve: 'CVE-2023-45288', severity: 'high', title: 'HTTP/2 CONTINUATION flood' },
+  ],
+  'golang.org/x/text': [
+    { below: 'v0.3.8', cve: 'CVE-2022-32149', severity: 'high', title: 'Denial of service via language tag' },
+  ],
+  'github.com/gin-gonic/gin': [
+    { below: 'v1.9.1', cve: 'CVE-2023-29401', severity: 'medium', title: 'Unsafe HTML in context.Header' },
+  ],
+  'github.com/go-git/go-git/v5': [
+    { below: 'v5.11.0', cve: 'CVE-2023-49568', severity: 'critical', title: 'DoS via malicious Git object' },
+  ],
+  'google.golang.org/grpc': [
+    { below: 'v1.56.3', cve: 'CVE-2023-44487', severity: 'high', title: 'HTTP/2 rapid reset DoS' },
+  ],
+  'google.golang.org/protobuf': [
+    { below: 'v1.33.0', cve: 'CVE-2024-24786', severity: 'medium', title: 'Infinite loop on JSON unmarshal' },
+  ],
+};
+
+// Known copyleft / restrictive licenses that may be problematic in commercial projects
+const COPYLEFT_LICENSES = new Set([
+  'GPL-2.0', 'GPL-2.0-only', 'GPL-2.0-or-later',
+  'GPL-3.0', 'GPL-3.0-only', 'GPL-3.0-or-later',
+  'AGPL-3.0', 'AGPL-3.0-only', 'AGPL-3.0-or-later',
+  'LGPL-2.1', 'LGPL-2.1-only', 'LGPL-2.1-or-later',
+  'LGPL-3.0', 'LGPL-3.0-only', 'LGPL-3.0-or-later',
+  'SSPL-1.0', 'EUPL-1.2', 'OSL-3.0', 'CPAL-1.0',
+  'CC-BY-SA-4.0', 'CC-BY-NC-4.0',
+]);
+
+/**
+ * Parse a version string into comparable parts.
+ * Handles: "1.2.3", "^1.2.3", "~1.2.3", ">=1.2.3", "v1.2.3"
+ * Returns null if unparseable.
+ */
+function parseVersion(verStr) {
+  if (!verStr) return null;
+  // Strip prefix chars: ^~>=<v
+  const cleaned = verStr.replace(/^[\^~>=<v]+/, '').trim();
+  // Handle calver or dates like "2023.7.22"
+  const parts = cleaned.split('.').map(p => {
+    const n = parseInt(p, 10);
+    return isNaN(n) ? 0 : n;
+  });
+  if (parts.length === 0) return null;
+  // Pad to at least 3 parts
+  while (parts.length < 3) parts.push(0);
+  return parts;
+}
+
+/**
+ * Returns true if actualVer < thresholdVer.
+ */
+function isVersionBelow(actualVer, thresholdVer) {
+  const actual = parseVersion(actualVer);
+  const threshold = parseVersion(thresholdVer);
+  if (!actual || !threshold) return false;
+
+  const len = Math.max(actual.length, threshold.length);
+  for (let i = 0; i < len; i++) {
+    const a = actual[i] || 0;
+    const t = threshold[i] || 0;
+    if (a < t) return true;
+    if (a > t) return false;
+  }
+  return false; // equal
+}
+
+/**
+ * Extract package name and version from dependency string.
+ * Handles: "lodash@^4.17.15", "requests>=2.28.0", "golang.org/x/net@v0.10.0"
+ */
+function parseDependency(depStr) {
+  if (!depStr) return null;
+
+  // npm-style: name@version
+  const atIdx = depStr.lastIndexOf('@');
+  if (atIdx > 0) {
+    return {
+      name: depStr.substring(0, atIdx),
+      version: depStr.substring(atIdx + 1),
+    };
+  }
+
+  // Python-style: name>=version, name==version, name~=version
+  const pyMatch = depStr.match(/^([a-zA-Z0-9_-]+)\s*([><=~!]+)\s*(.+)/);
+  if (pyMatch) {
+    return { name: pyMatch[1].toLowerCase(), version: pyMatch[3].trim() };
+  }
+
+  // Go-style with spaces: golang.org/x/net v0.10.0
+  const goMatch = depStr.match(/^(\S+)\s+(v\S+)/);
+  if (goMatch) {
+    return { name: goMatch[1], version: goMatch[2] };
+  }
+
+  return null;
+}
+
+/**
+ * Check dependencies against the offline CVE database.
+ * Returns array of findings.
+ */
+function checkKnownCVEs(dependencies, dependencyFile) {
+  const findings = [];
+  if (!dependencies || dependencies.length === 0) return findings;
+
+  for (const depStr of dependencies) {
+    const dep = parseDependency(depStr);
+    if (!dep) continue;
+
+    // Look up the package in our database
+    const cves = KNOWN_CVES[dep.name] || KNOWN_CVES[dep.name.toLowerCase()];
+    if (!cves) continue;
+
+    for (const cve of cves) {
+      if (isVersionBelow(dep.version, cve.below)) {
+        findings.push({
+          id: 'L0-CVE',
+          title: `Known vulnerability in ${dep.name}`,
+          layer: 'L0',
+          severity: cve.severity,
+          owasp: 'A06:2021 Vulnerable and Outdated Components',
+          nis2: 'Art. 21(2)(e) — Secure development',
+          gdpr: null,
+          dora: null,
+          file: dependencyFile || '(dependency)',
+          line: null,
+          code: `${dep.name}@${dep.version} < ${cve.below}`,
+          mitigated: false,
+          guardLine: null,
+          guardCode: null,
+          description: `${cve.cve}: ${cve.title}. Installed version ${dep.version} is below the fix version ${cve.below}.`,
+          recommendation: `Upgrade ${dep.name} to version ${cve.below} or later. Run: npm update ${dep.name} (npm) / pip install --upgrade ${dep.name} (pip) / go get ${dep.name}@latest (Go).`,
+        });
+      }
+    }
+  }
+
+  return findings;
+}
+
+/**
+ * Check for dependencies that appear outdated based on version heuristics.
+ * Flags packages pinned to very old major versions.
+ * Returns array of findings.
+ */
+function checkDependencyAge(dependencies, dependencyFile) {
+  const findings = [];
+  if (!dependencies || dependencies.length === 0) return findings;
+
+  // Known packages with their current major versions (as of 2025)
+  // If a project uses a version 2+ majors behind, flag it
+  const MAJOR_VERSION_EXPECTATIONS = {
+    // npm
+    'express': 4, 'react': 18, 'react-dom': 18, 'next': 14,
+    'typescript': 5, 'webpack': 5, 'eslint': 8, 'jest': 29,
+    'axios': 1, 'lodash': 4, 'mongoose': 7, 'prisma': 5,
+    '@prisma/client': 5, 'socket.io': 4, 'fastify': 4,
+    'graphql': 16, 'pg': 8, 'mysql2': 3, 'redis': 4,
+    'commander': 11, 'chalk': 5, 'dotenv': 16, 'zod': 3,
+    'uuid': 9, 'sharp': 0, 'cors': 2,
+    // PyPI
+    'django': 5, 'flask': 3, 'fastapi': 0, 'sqlalchemy': 2,
+    'requests': 2, 'numpy': 1, 'pandas': 2, 'pydantic': 2,
+    'celery': 5, 'pillow': 10, 'boto3': 1, 'cryptography': 42,
+    // Go (use 1 as baseline; Go modules mostly stay at v1/v2)
+  };
+
+  for (const depStr of dependencies) {
+    const dep = parseDependency(depStr);
+    if (!dep) continue;
+
+    const expectedMajor = MAJOR_VERSION_EXPECTATIONS[dep.name];
+    if (expectedMajor === undefined) continue;
+
+    const version = parseVersion(dep.version);
+    if (!version) continue;
+
+    const actualMajor = version[0];
+    const majorsBehind = expectedMajor - actualMajor;
+
+    // Only flag if 2+ major versions behind (to avoid noise)
+    if (majorsBehind >= 2) {
+      findings.push({
+        id: 'L0-AGE',
+        title: `Outdated dependency: ${dep.name}`,
+        layer: 'L0',
+        severity: 'low',
+        owasp: 'A06:2021 Vulnerable and Outdated Components',
+        nis2: 'Art. 21(2)(e) — Secure development',
+        gdpr: null,
+        dora: null,
+        file: dependencyFile || '(dependency)',
+        line: null,
+        code: `${dep.name}@${dep.version} (current major: ${expectedMajor})`,
+        mitigated: false,
+        guardLine: null,
+        guardCode: null,
+        description: `${dep.name} is ${majorsBehind} major version(s) behind (using v${actualMajor}, current is v${expectedMajor}). Outdated dependencies may lack security patches and bug fixes.`,
+        recommendation: `Consider upgrading ${dep.name} to the latest major version. Review the changelog for breaking changes before upgrading.`,
+      });
+    }
+  }
+
+  return findings;
+}
+
+/**
+ * Check for copyleft or restrictive licenses in dependencies.
+ * Reads package.json license fields for npm projects.
+ * Returns array of findings.
+ */
+function checkLicenseCompliance(repoPath, dependencies, dependencyFile) {
+  const findings = [];
+  if (!dependencies || dependencies.length === 0) return findings;
+
+  // Only check npm projects with node_modules available
+  if (dependencyFile !== 'package.json') return findings;
+
+  const nodeModulesPath = path.join(repoPath, 'node_modules');
+  if (!fs.existsSync(nodeModulesPath)) return findings;
+
+  for (const depStr of dependencies) {
+    const dep = parseDependency(depStr);
+    if (!dep) continue;
+
+    // Read the dependency's package.json
+    const depPkgPath = path.join(nodeModulesPath, dep.name, 'package.json');
+    if (!fs.existsSync(depPkgPath)) continue;
+
+    try {
+      const depPkg = JSON.parse(fs.readFileSync(depPkgPath, 'utf-8'));
+      const license = depPkg.license || '';
+      const licenseStr = typeof license === 'string' ? license : (license.type || '');
+
+      if (COPYLEFT_LICENSES.has(licenseStr)) {
+        findings.push({
+          id: 'L0-LIC',
+          title: `Copyleft license: ${dep.name}`,
+          layer: 'L0',
+          severity: 'medium',
+          owasp: null,
+          nis2: 'Art. 21(2)(e) — Secure development',
+          gdpr: null,
+          dora: null,
+          file: dependencyFile,
+          line: null,
+          code: `${dep.name}: ${licenseStr}`,
+          mitigated: false,
+          guardLine: null,
+          guardCode: null,
+          description: `${dep.name} uses the ${licenseStr} license, which is a copyleft license. This may require you to release your source code under the same license if you distribute or deploy your software.`,
+          recommendation: `Review the ${licenseStr} license obligations. Consider whether your usage is compatible (e.g., LGPL for dynamic linking). If not, find an alternative package with a permissive license (MIT, Apache-2.0, BSD).`,
+        });
+      }
+    } catch {
+      // Skip unreadable package.json
+    }
+  }
+
+  return findings;
+}
+
+/**
+ * Run all dependency checks.
+ * Returns array of findings.
+ */
+function runDependencyChecks(repoPath, discovery) {
+  const findings = [];
+
+  // CVE matching
+  findings.push(...checkKnownCVEs(discovery.dependencies, discovery.dependencyFile));
+
+  // Dependency age
+  findings.push(...checkDependencyAge(discovery.dependencies, discovery.dependencyFile));
+
+  // License compliance
+  findings.push(...checkLicenseCompliance(repoPath, discovery.dependencies, discovery.dependencyFile));
+
+  return findings;
+}
 
 
 
@@ -1449,6 +2133,9 @@ function main() {
 
   // L0 Discovery
   const discovery = runL0Discovery(repoPath, allContent, sourceFiles);
+
+  // Dependency checks (CVE, age, license)
+  findings.push(...runDependencyChecks(repoPath, discovery));
 
   const durationMs = Date.now() - startTime;
 
