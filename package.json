@@ -7,7 +7,9 @@
     "compuute-scan": "./compuute-scan.js"
   },
   "scripts": {
-    "test": "bash test.sh"
+    "test": "bash test.sh",
+    "verify": "node verify-integrity.js",
+    "verify:hash": "node verify-integrity.js --hash"
   },
   "keywords": ["mcp", "security", "scanner", "owasp", "nis2", "dora", "gdpr", "audit", "pii", "python", "golang", "typescript"],
   "author": "Compuute AB",
@@ -24,6 +26,8 @@
   },
   "files": [
     "compuute-scan.js",
+    "verify-integrity.js",
+    "SECURITY.md",
     "README.md",
     "LICENSE"
   ]
