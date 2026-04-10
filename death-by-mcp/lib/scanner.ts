@@ -1,7 +1,7 @@
 import { execFileSync } from 'child_process';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import {
   calculateScore,
   getRiskLevel,
@@ -39,6 +39,8 @@ function redactFinding(finding: ScanFinding): ScanFinding {
     ...finding,
     description: redactString(finding.description),
     recommendation: redactString(finding.recommendation),
+    code: finding.code ? redactString(finding.code) : finding.code,
+    guardCode: finding.guardCode ? redactString(finding.guardCode) : finding.guardCode,
     // Strip full file paths to just relative filename
     file: finding.file.split('/').slice(-2).join('/'),
   };
@@ -82,45 +84,60 @@ function ensureDocker(): void {
 /**
  * Docker-isolated scan: clone in network container, scan in network-none container.
  * Git hooks disabled via core.hooksPath=/dev/null.
+ * Each scan gets a unique volume to prevent concurrent scan collisions.
  */
 function runDockerScan(repoUrl: string, repoName: string): string {
-  const composeBase = ['docker', 'compose', '-f', COMPOSE_FILE];
+  const volumeName = `scan-work-${randomBytes(8).toString('hex')}`;
+  const projectName = `scan-${randomBytes(4).toString('hex')}`;
+  const composeBase = [
+    'docker', 'compose',
+    '-f', COMPOSE_FILE,
+    '-p', projectName,
+  ];
 
-  // Clean previous scan volume
+  // Create isolated volume for this scan
+  execFileSync('docker', ['volume', 'create', volumeName], {
+    stdio: 'pipe',
+    timeout: 10_000,
+  });
+
   try {
-    execFileSync('docker', ['volume', 'rm', 'death-by-mcp-scan-work', '-f'], {
-      stdio: 'pipe',
-      timeout: 10_000,
-    });
-  } catch {
-    // Volume may not exist
+    // Stage 1: Clone (has network, hooks disabled, non-root)
+    execFileSync(
+      composeBase[0],
+      [
+        ...composeBase.slice(1),
+        'run', '--rm',
+        '-v', `${volumeName}:/work`,
+        'clone', repoUrl, `/work/${repoName}`,
+      ],
+      { timeout: CLONE_TIMEOUT, stdio: 'pipe' },
+    );
+
+    // Stage 2: Scan (ZERO network, read-only FS, all caps dropped)
+    const scanOutput = execFileSync(
+      composeBase[0],
+      [
+        ...composeBase.slice(1),
+        'run', '--rm',
+        '-v', `${volumeName}:/work:ro`,
+        'scan', `/work/${repoName}`, '--json',
+      ],
+      { timeout: SCAN_TIMEOUT, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+
+    return scanOutput;
+  } finally {
+    // Always clean up the volume, even on failure
+    try {
+      execFileSync('docker', ['volume', 'rm', volumeName, '-f'], {
+        stdio: 'pipe',
+        timeout: 10_000,
+      });
+    } catch {
+      // Best effort cleanup
+    }
   }
-
-  // Stage 1: Clone (has network, hooks disabled, non-root)
-  execFileSync(
-    composeBase[0],
-    [...composeBase.slice(1), 'run', '--rm', 'clone', repoUrl, `/work/${repoName}`],
-    { timeout: CLONE_TIMEOUT, stdio: 'pipe' },
-  );
-
-  // Stage 2: Scan (ZERO network, read-only FS, all caps dropped)
-  const scanOutput = execFileSync(
-    composeBase[0],
-    [...composeBase.slice(1), 'run', '--rm', 'scan', `/work/${repoName}`, '--json'],
-    { timeout: SCAN_TIMEOUT, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
-  );
-
-  // Clean up volume
-  try {
-    execFileSync('docker', ['volume', 'rm', 'death-by-mcp-scan-work', '-f'], {
-      stdio: 'pipe',
-      timeout: 10_000,
-    });
-  } catch {
-    // Best effort cleanup
-  }
-
-  return scanOutput;
 }
 
 export async function runScan(repoUrl: string): Promise<ScanResult> {
@@ -137,7 +154,12 @@ export async function runScan(repoUrl: string): Promise<ScanResult> {
 
   const scanOutput = runDockerScan(validated, repoName);
 
-  const scanData = JSON.parse(scanOutput);
+  let scanData;
+  try {
+    scanData = JSON.parse(scanOutput);
+  } catch {
+    throw new Error('Scanner returned invalid output. The repository may be unsupported or empty.');
+  }
   const findings: ScanFinding[] = (scanData.findings || []).map(redactFinding);
 
   // Calculate score and risk

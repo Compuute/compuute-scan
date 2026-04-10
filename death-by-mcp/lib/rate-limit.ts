@@ -1,3 +1,5 @@
+// In-memory rate limiter — works for single-instance deployments.
+// For multi-instance / serverless (Vercel), replace with Upstash Redis or Vercel KV.
 const hits = new Map<string, number[]>();
 
 const WINDOW_MS = 60 * 60 * 1000; // 1 hour

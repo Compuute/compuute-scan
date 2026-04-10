@@ -9,7 +9,8 @@ import type { ScanResult } from '@/lib/scoring';
 
 export default function ScanResultPage() {
   const params = useParams();
-  const id = params.id as string;
+  const rawId = params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const [result, setResult] = useState<ScanResult | null>(null);
   const [showShare, setShowShare] = useState(false);
 
