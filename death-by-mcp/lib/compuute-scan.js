@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// compuute-scan v0.3.0 — MCP Server Security Scanner
+// compuute-scan v0.3.1 — MCP Server Security Scanner
 // Compuute AB | daniel@compuute.se
 // Zero external dependencies. Node.js built-ins only.
 
@@ -12,7 +12,7 @@ const path = require('path');
 // Constants
 // ─────────────────────────────────────────────
 
-const VERSION = '0.3.0';
+const VERSION = '0.3.1';
 const MAX_FILE_SIZE = 500 * 1024; // 500 KB
 const MAX_CODE_SNIPPET = 120; // max characters in code/guardCode snippets
 const GUARD_WINDOW = 15; // lines above/below to check for guards
@@ -27,6 +27,57 @@ const SKIP_DIRS = new Set([
 ]);
 
 const SEVERITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+
+// Inline suppression: place on the line ABOVE a finding to suppress it
+// Supports: // compuute-scan-ignore-next-line
+//           // compuute-scan-ignore-next-line L1-006
+//           # compuute-scan-ignore-next-line (Python)
+const IGNORE_PATTERN = /(?:\/\/|#)\s*compuute-scan-ignore-next-line(?:\s+(L\d+-\d+))?/;
+
+// ─────────────────────────────────────────────
+// Configuration
+// ─────────────────────────────────────────────
+
+function loadConfig(repoPath) {
+  const configPath = path.join(repoPath, '.compuute-scan.json');
+  if (!fs.existsSync(configPath)) return null;
+  try {
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error(`[warn] Failed to parse .compuute-scan.json: ${err.message}`);
+    return null;
+  }
+}
+
+function shouldIgnoreFile(relPath, config) {
+  if (!config || !config.ignore || !Array.isArray(config.ignore)) return false;
+  for (const pattern of config.ignore) {
+    // Simple glob: "test/**" matches "test/foo.js", "*.test.js" matches "bar.test.js"
+    const re = new RegExp(
+      '^' + pattern
+        .replace(/\./g, '\\.')
+        .replace(/\*\*/g, '(.+)')
+        .replace(/\*/g, '([^/]+)')
+      + '$'
+    );
+    if (re.test(relPath)) return true;
+  }
+  return false;
+}
+
+function applyRuleConfig(rules, config) {
+  if (!config || !config.rules) return rules;
+  return rules.filter(rule => {
+    const override = config.rules[rule.id];
+    if (!override) return true;
+    if (override.enabled === false) return false;
+    if (override.severity && SEVERITY_ORDER[override.severity] !== undefined) {
+      rule.severity = override.severity;
+    }
+    return true;
+  });
+}
 
 // ─────────────────────────────────────────────
 // CLI Argument Parsing
@@ -841,6 +892,15 @@ function scanFile(filePath, repoPath, allRules) {
       if (!matched) continue;
       if (rule.contextCheck && !rule.contextCheck(lines, i)) continue;
 
+      // Check for inline ignore comment on the line above
+      if (i > 0) {
+        const ignoreMatch = IGNORE_PATTERN.exec(lines[i - 1]);
+        if (ignoreMatch) {
+          const ignoreRuleId = ignoreMatch[1];
+          if (!ignoreRuleId || ignoreRuleId === rule.id) continue;
+        }
+      }
+
       const guard = (rule.guards && rule.guards.length > 0)
         ? checkGuard(lines, i, rule.guards)
         : null;
@@ -1131,10 +1191,23 @@ function main() {
 
   const startTime = Date.now();
 
-  // Walk files
-  const sourceFiles = walkDir(repoPath);
+  // Load config
+  const config = loadConfig(repoPath);
+  if (config && opts.verbose) {
+    console.error('Loaded .compuute-scan.json');
+  }
+
+  // Walk files (respecting config ignore patterns)
+  const allSourceFiles = walkDir(repoPath);
+  const sourceFiles = config
+    ? allSourceFiles.filter(f => !shouldIgnoreFile(path.relative(repoPath, f), config))
+    : allSourceFiles;
+
   if (opts.verbose) {
     console.error(`Scanning ${sourceFiles.length} files in ${repoPath}...`);
+    if (allSourceFiles.length !== sourceFiles.length) {
+      console.error(`  (${allSourceFiles.length - sourceFiles.length} files excluded by config)`);
+    }
   }
 
   // Build combined content for negative checks
@@ -1150,8 +1223,9 @@ function main() {
   }
   const allContent = contentParts.join('\n');
 
-  // Collect all per-file rules
-  const allFileRules = [...L1_RULES, ...L2_RULES, ...L3_RULES, ...L4_RULES, ...L4_RULES_EXTRA];
+  // Collect all per-file rules (apply config overrides)
+  let allFileRules = [...L1_RULES, ...L2_RULES, ...L3_RULES, ...L4_RULES, ...L4_RULES_EXTRA];
+  allFileRules = applyRuleConfig(allFileRules, config);
 
   // Run per-file scans
   let findings = [];
@@ -1160,8 +1234,9 @@ function main() {
     findings.push(...fileFindings);
   }
 
-  // Run negative checks
-  const negativeRules = [...L1_NEGATIVE_RULES, ...L2_NEGATIVE_RULES, ...L3_NEGATIVE_RULES, ...L4_NEGATIVE_RULES];
+  // Run negative checks (apply config overrides)
+  let negativeRules = [...L1_NEGATIVE_RULES, ...L2_NEGATIVE_RULES, ...L3_NEGATIVE_RULES, ...L4_NEGATIVE_RULES];
+  negativeRules = applyRuleConfig(negativeRules, config);
   findings.push(...runNegativeChecks(allContent, negativeRules));
 
   // L0 Discovery

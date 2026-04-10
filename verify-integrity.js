@@ -29,8 +29,8 @@ const SCANNER_PATH = path.join(__dirname, 'compuute-scan.js');
 const FORBIDDEN_PATTERNS = [
   {
     name: 'child_process execution',
-    pattern: /\b(exec|execSync|execFile|execFileSync|spawn|spawnSync|fork)\s*\(/g,
-    description: 'Scanner must not execute external processes',
+    pattern: /(?<!\.)(?<!\w)(exec|execSync|execFile|execFileSync|spawn|spawnSync|fork)\s*\(/g,
+    description: 'Scanner must not execute external processes (regex .exec() is allowed)',
   },
   {
     name: 'network access (http/https)',
