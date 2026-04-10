@@ -12,24 +12,15 @@ For full L2-L4 security assessment: [compuute.se/audit](https://compuute.se/audi
 
 ## Setup
 
+Docker is **required** -- all scans run inside isolated containers. No untrusted code touches the host.
+
 ```bash
 npm install
-npm run dev
-```
-
-## Production Setup (Docker-isolated scanning)
-
-For production, scans run inside Docker containers with full isolation:
-
-```bash
-# Build the scanner image
 docker compose -f docker-compose.scanner.yml build
-
-# Start the app
 npm run dev
 ```
 
-When Docker is available, every scan runs as a two-stage pipeline:
+Every scan runs as a two-stage pipeline:
 
 ```
 ┌─────────────────┐         ┌──────────────────────────┐
@@ -49,20 +40,10 @@ When Docker is available, every scan runs as a two-stage pipeline:
 | Capabilities | NET_RAW only | **All dropped** |
 | User | Non-root (scanner) | Non-root (scanner) |
 
-Without Docker (local dev), scans still run with git hook protection:
-- `core.hooksPath=/dev/null` -- disables all git hooks
-- `core.fsmonitor=false` -- disables filesystem monitor hooks
-- `protocol.file.allow=never` -- prevents local file protocol exploits
-- `.git/hooks/` directory deleted after clone
-- `GIT_TERMINAL_PROMPT=0` -- prevents interactive prompts
-
 ## Deploy
 
 ```bash
-# Vercel (recommended) — needs Vercel Pro for 60s function timeout
-npx vercel
-
-# Self-hosted (recommended for Docker isolation)
+# Self-hosted (Docker required)
 docker compose -f docker-compose.scanner.yml build
 npm run build
 npm start
