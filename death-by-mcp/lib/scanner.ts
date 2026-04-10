@@ -15,6 +15,7 @@ const CLONE_TIMEOUT = 30_000;
 const SCAN_TIMEOUT = 30_000;
 const MAX_REPO_SIZE_MB = 100;
 const SCANNER_PATH = join(process.cwd(), 'lib', 'compuute-scan.js');
+const COMPOSE_FILE = join(process.cwd(), 'docker-compose.scanner.yml');
 
 const GITHUB_URL_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+(\.git)?$/;
 
@@ -66,6 +67,106 @@ function generateScanId(url: string): string {
   return hash.slice(0, 12);
 }
 
+function isDockerAvailable(): boolean {
+  try {
+    execFileSync('docker', ['info'], { stdio: 'pipe', timeout: 5000 });
+    return existsSync(COMPOSE_FILE);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Docker-isolated scan: clone in network container, scan in network-none container.
+ * Git hooks disabled via core.hooksPath=/dev/null.
+ */
+function runDockerScan(repoUrl: string, repoName: string): string {
+  const composeBase = ['docker', 'compose', '-f', COMPOSE_FILE];
+
+  // Clean previous scan volume
+  try {
+    execFileSync('docker', ['volume', 'rm', 'death-by-mcp-scan-work', '-f'], {
+      stdio: 'pipe',
+      timeout: 10_000,
+    });
+  } catch {
+    // Volume may not exist
+  }
+
+  // Stage 1: Clone (has network, hooks disabled, non-root)
+  execFileSync(
+    composeBase[0],
+    [...composeBase.slice(1), 'run', '--rm', 'clone', repoUrl, `/work/${repoName}`],
+    { timeout: CLONE_TIMEOUT, stdio: 'pipe' },
+  );
+
+  // Stage 2: Scan (ZERO network, read-only FS, all caps dropped)
+  const scanOutput = execFileSync(
+    composeBase[0],
+    [...composeBase.slice(1), 'run', '--rm', 'scan', `/work/${repoName}`, '--json'],
+    { timeout: SCAN_TIMEOUT, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+  );
+
+  // Clean up volume
+  try {
+    execFileSync('docker', ['volume', 'rm', 'death-by-mcp-scan-work', '-f'], {
+      stdio: 'pipe',
+      timeout: 10_000,
+    });
+  } catch {
+    // Best effort cleanup
+  }
+
+  return scanOutput;
+}
+
+/**
+ * Bare-metal scan: direct git clone + node scan (for local dev without Docker).
+ * Disables git hooks to prevent code execution from malicious repos.
+ */
+function runBareScan(repoUrl: string, repoName: string): { scanOutput: string; tmpDir: string } {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'mcp-scan-'));
+  const repoDir = join(tmpDir, repoName);
+
+  // Clone with hooks disabled
+  execFileSync('git', [
+    'clone', '--depth', '1',
+    '--config', 'core.hooksPath=/dev/null',
+    '--config', 'core.fsmonitor=false',
+    '--config', 'protocol.file.allow=never',
+    repoUrl, repoDir,
+  ], {
+    timeout: CLONE_TIMEOUT,
+    stdio: 'pipe',
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+  });
+
+  // Remove .git hooks directory as extra safety
+  const hooksDir = join(repoDir, '.git', 'hooks');
+  if (existsSync(hooksDir)) {
+    rmSync(hooksDir, { recursive: true, force: true });
+  }
+
+  // Check repo size
+  const sizeOutput = execSync(`du -sm "${repoDir}" | cut -f1`, {
+    encoding: 'utf-8',
+    timeout: 5000,
+  }).trim();
+  const sizeMB = parseInt(sizeOutput, 10);
+  if (sizeMB > MAX_REPO_SIZE_MB) {
+    throw new Error(`Repository too large (${sizeMB}MB). Maximum is ${MAX_REPO_SIZE_MB}MB.`);
+  }
+
+  // Run scan
+  const scanOutput = execFileSync('node', [SCANNER_PATH, repoDir, '--json'], {
+    timeout: SCAN_TIMEOUT,
+    encoding: 'utf-8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  return { scanOutput, tmpDir };
+}
+
 export async function runScan(repoUrl: string): Promise<ScanResult> {
   const validated = validateRepoUrl(repoUrl);
   if (!validated) {
@@ -74,32 +175,22 @@ export async function runScan(repoUrl: string): Promise<ScanResult> {
 
   const repoName = extractRepoName(validated);
   const scanId = generateScanId(validated);
-  const tmpDir = mkdtempSync(join(tmpdir(), 'mcp-scan-'));
-  const repoDir = join(tmpDir, repoName);
+  const useDocker = isDockerAvailable();
+
+  let scanOutput: string;
+  let tmpDir: string | null = null;
 
   try {
-    // Shallow clone
-    execFileSync('git', ['clone', '--depth', '1', validated, repoDir], {
-      timeout: CLONE_TIMEOUT,
-      stdio: 'pipe',
-    });
-
-    // Check repo size
-    const sizeOutput = execSync(`du -sm "${repoDir}" | cut -f1`, {
-      encoding: 'utf-8',
-      timeout: 5000,
-    }).trim();
-    const sizeMB = parseInt(sizeOutput, 10);
-    if (sizeMB > MAX_REPO_SIZE_MB) {
-      throw new Error(`Repository too large (${sizeMB}MB). Maximum is ${MAX_REPO_SIZE_MB}MB.`);
+    if (useDocker) {
+      // Production: full Docker isolation
+      scanOutput = runDockerScan(validated, repoName);
+    } else {
+      // Dev fallback: bare-metal with hook mitigation
+      console.warn('[scanner] Docker not available — running bare-metal scan with hook protection');
+      const result = runBareScan(validated, repoName);
+      scanOutput = result.scanOutput;
+      tmpDir = result.tmpDir;
     }
-
-    // Run compuute-scan
-    const scanOutput = execFileSync('node', [SCANNER_PATH, repoDir, '--json'], {
-      timeout: SCAN_TIMEOUT,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
 
     const scanData = JSON.parse(scanOutput);
     const findings: ScanFinding[] = (scanData.findings || []).map(redactFinding);
@@ -138,8 +229,8 @@ export async function runScan(repoUrl: string): Promise<ScanResult> {
       layersCovered: ['L0', 'L1'],
     };
   } finally {
-    // Always clean up
-    if (existsSync(tmpDir)) {
+    // Clean up bare-metal temp dir
+    if (tmpDir && existsSync(tmpDir)) {
       rmSync(tmpDir, { recursive: true, force: true });
     }
   }
