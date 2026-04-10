@@ -17,11 +17,55 @@ npm install
 npm run dev
 ```
 
+## Production Setup (Docker-isolated scanning)
+
+For production, scans run inside Docker containers with full isolation:
+
+```bash
+# Build the scanner image
+docker compose -f docker-compose.scanner.yml build
+
+# Start the app
+npm run dev
+```
+
+When Docker is available, every scan runs as a two-stage pipeline:
+
+```
+┌─────────────────┐         ┌──────────────────────────┐
+│  Stage 1: Clone │         │  Stage 2: Scan           │
+│  bridge network │────────▶│  network: none           │
+│  hooks disabled │  volume │  read-only filesystem    │
+│  non-root user  │         │  all caps dropped        │
+│  256MB / 0.5CPU │         │  512MB / 1CPU            │
+└─────────────────┘         └──────────────────────────┘
+```
+
+| Property | Clone container | Scan container |
+|----------|----------------|----------------|
+| Network | Bridge (git only) | **none** -- zero network stack |
+| Git hooks | **Disabled** (core.hooksPath=/dev/null) | N/A |
+| Filesystem | Read-only + tmpfs | **Read-only** |
+| Capabilities | NET_RAW only | **All dropped** |
+| User | Non-root (scanner) | Non-root (scanner) |
+
+Without Docker (local dev), scans still run with git hook protection:
+- `core.hooksPath=/dev/null` -- disables all git hooks
+- `core.fsmonitor=false` -- disables filesystem monitor hooks
+- `protocol.file.allow=never` -- prevents local file protocol exploits
+- `.git/hooks/` directory deleted after clone
+- `GIT_TERMINAL_PROMPT=0` -- prevents interactive prompts
+
 ## Deploy
 
 ```bash
-# Vercel (recommended)
+# Vercel (recommended) — needs Vercel Pro for 60s function timeout
 npx vercel
+
+# Self-hosted (recommended for Docker isolation)
+docker compose -f docker-compose.scanner.yml build
+npm run build
+npm start
 ```
 
 ## Tech Stack
@@ -29,6 +73,7 @@ npx vercel
 - Next.js 15 (App Router)
 - TypeScript
 - Tailwind CSS
+- Docker (production scanning isolation)
 - Stateless (no database)
 
 ## Security & Ethics
