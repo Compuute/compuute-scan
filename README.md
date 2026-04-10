@@ -1,6 +1,6 @@
 # compuute-scan
 
-**Static security scanner for MCP servers. Covers 81% of the MCP ecosystem (TypeScript, JavaScript, Python, Go). Zero dependencies. OWASP Top 10 + NIS2 + GDPR + DORA mapped.**
+**Open-source security scanner for MCP servers. Detects sandboxing & code execution risks across TypeScript, JavaScript, Python, and Go (81% of the MCP ecosystem). Zero dependencies.**
 
 [![Version](https://img.shields.io/badge/version-0.3.0-blue)](#)
 [![License](https://img.shields.io/badge/license-MIT-green)](#license)
@@ -10,7 +10,7 @@
 
 ## What It Does
 
-`compuute-scan` analyzes MCP (Model Context Protocol) server source code for security vulnerabilities before deployment. It runs fully offline, requires no API keys, and produces audit-ready reports mapped to **OWASP Top 10 (2021)**, **NIS2 Art. 21**, **GDPR Art. 5/25**, and **DORA** compliance frameworks.
+`compuute-scan` analyzes MCP (Model Context Protocol) server source code for security vulnerabilities before deployment. It runs fully offline, requires no API keys, and covers **L0 Discovery** and **L1 Sandboxing** — the foundational security layers every MCP server needs.
 
 **Supports TypeScript, JavaScript, Python, and Go** — covering ~81% of the MCP server ecosystem (based on 11,720+ GitHub repos, April 2026).
 
@@ -49,32 +49,39 @@ docker compose build
 
 ## What It Scans
 
-**49 rules across 5 VIGIL security layers:**
+### VIGIL Security Layers
 
-| Layer | Focus | Rules | Examples |
-|-------|-------|-------|----------|
-| **L0** | Discovery | Metadata | Transport detection (stdio/SSE/HTTP), tool inventory, dependency pinning, go.mod/pyproject.toml parsing |
-| **L1** | Sandboxing | 22 | `eval()`, `exec.Command`, `pickle.loads`, `yaml.load`, path traversal, CORS wildcards, SSL bypass, insecure random |
-| **L2** | Authorization | 11 | Hardcoded secrets/DB strings, JWT expiry/verify bypass, missing auth/RBAC, PII storage/logging, weak crypto (MD5/SHA1), data retention |
-| **L3** | Tool Integrity | 10 | SSRF, SQL injection (JS/Python f-string/Go fmt.Sprintf), prompt injection, PII in responses, supply chain |
-| **L4** | Monitoring | 6 | Missing audit logs, rate limiting, error leakage, ReDoS patterns |
+| Layer | Focus | Availability |
+|-------|-------|-------------|
+| **L0** | Discovery — transport detection, tool inventory, dependency pinning | Open Source |
+| **L1** | Sandboxing — `eval()`, `exec.Command`, `pickle.loads`, path traversal, CORS, SSL bypass | Open Source |
+| **L2** | Authorization — RBAC, secrets, JWT, PII/GDPR, crypto | [Compuute Professional Audit](https://compuute.se/audit) |
+| **L3** | Tool Integrity — SSRF, SQL injection, prompt injection, supply chain | [Compuute Professional Audit](https://compuute.se/audit) |
+| **L4** | Monitoring — audit logging, rate limiting, error leakage, ReDoS | [Compuute Professional Audit](https://compuute.se/audit) |
+
+### Open Source Rules (L0 + L1)
+
+**22 rules** covering code execution, sandboxing, and discovery:
+
+| Category | Examples |
+|----------|----------|
+| **Code execution** | `eval()`, `exec.Command`, `pickle.loads`, `yaml.load(Loader=FullLoader)` |
+| **Path traversal** | Unsanitized file paths, missing `realpath()` checks |
+| **CORS misconfiguration** | Wildcard origins in cors(), Starlette, rs/cors |
+| **SSL/TLS bypass** | `verify=False`, `rejectUnauthorized: false`, `InsecureSkipVerify` |
+| **SQL injection** | Python f-string queries, Go `fmt.Sprintf` queries |
+| **Insecure random** | `Math.random()`, `random.choices()`, `rand.Intn()` for security |
+| **Template injection** | Go `text/template` for HTML output |
+| **Security headers** | Missing helmet/secure-headers middleware |
+| **Discovery** | Transport detection, tool inventory, dependency pinning, go.mod/pyproject.toml parsing |
 
 ### Language-Specific Rules
 
 | Language | Ecosystem Share | Key Detections |
 |---|---|---|
-| **TypeScript/JS** | 40% | eval, child_process, CORS, SSRF, npm hooks, unpinned git deps |
-| **Python** | 35% | pickle, YAML unsafe load, f-string SQL injection, Starlette CORS, hashlib, verify=False |
-| **Go** | 6% | exec.Command+sh, fmt.Sprintf SQL, InsecureSkipVerify, text/template XSS, rs/cors wildcard |
-
-### Compliance Coverage
-
-| Framework | Coverage |
-|---|---|
-| **OWASP Top 10 (2021)** | **10/10** — all categories |
-| **NIS2 Art. 21(2)** | **7/7** technical (a/b/i are organisational) |
-| **GDPR** | **6/6** technical — Art. 5(1)(b)(c)(e)(f), Art. 25, Art. 32 |
-| **DORA** | **4/7** — Art. 5-6, 8-9, 28 (remainder is process/runtime) |
+| **TypeScript/JS** | 40% | eval, child_process, CORS, npm hooks, unpinned git deps |
+| **Python** | 35% | pickle, YAML unsafe load, f-string SQL, Starlette CORS, verify=False |
+| **Go** | 6% | exec.Command+sh, fmt.Sprintf SQL, InsecureSkipVerify, text/template XSS, rs/cors |
 
 ### Guard Detection
 
@@ -82,26 +89,21 @@ The scanner checks a **±15-line window** around each finding for mitigation pat
 
 ### Negative Checks
 
-Detects the **absence** of security controls across the entire codebase: no authentication, no RBAC, no PII redaction, no input validation (zod/pydantic), no security headers (helmet), no audit logging, no rate limiting. Architectural risks that pattern matching alone won't catch.
+Detects the **absence** of security controls across the entire codebase: no input validation (zod/pydantic), no security headers (helmet). Architectural risks that pattern matching alone won't catch.
 
-## Example: Official MCP Servers Audit
+## Full Security Assessment
 
-Scan of [modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers) — 77 files:
+The open-source scanner covers foundational L0-L1 risks. Production MCP deployments need deeper analysis:
 
-| Severity | Raw Findings | After Validation |
-|----------|-------------|-----------------|
-| 🔴 Critical | 1 | 0 |
-| 🟠 High | 63 | 2 confirmed |
-| 🟡 Medium | 68 | 4 |
-| 🟢 Low | 6 | 7 |
-| **Total** | **138** | **13** |
-| Mitigated by guard detection | 64 | — |
+| Layer | What You Get | Rules |
+|-------|-------------|-------|
+| **L2 Authorization** | RBAC, secret management, JWT/OAuth, PII/GDPR compliance, weak crypto | 11 |
+| **L3 Tool Integrity** | SSRF, injection, prompt poisoning, PII in responses, supply chain | 10 |
+| **L4 Runtime Monitoring** | Audit logging, rate limiting, error leakage, ReDoS | 6 |
 
-**Confirmed findings:**
-- SSRF via unfiltered `fetch()` — no private IP blocking (cloud metadata harvesting)
-- Full `process.env` dump exposing secrets to MCP clients
+**49 rules total. OWASP Top 10 (10/10). NIS2 Art. 21 (7/7). GDPR (6/6). DORA (4/7).**
 
-64 findings were automatically downgraded via guard detection. Manual review confirmed 125 false positives due to centralized validation patterns the scanner's window doesn't always reach — demonstrating where automated scanning ends and expert review begins.
+> **[Book a Compuute Professional Audit](https://compuute.se/audit)** — full L0-L4 assessment with compliance mapping for OWASP, NIS2, GDPR, and DORA.
 
 ## Docker-Isolated Scanning
 
@@ -142,7 +144,7 @@ compuute-scan <path> [options]
   --output, -o <file>        Write report to file
   --json                     Output as JSON
   --sarif                    Output as SARIF (GitHub Code Scanning)
-  --layer <L0-L4>            Filter by VIGIL layer
+  --layer <L0-L1>            Filter by VIGIL layer
   --min-severity <level>     Filter: critical, high, medium, low
   --fail-on-severity <level> Exit code 1 if findings >= severity (for CI)
   --verbose                  Show files being scanned
@@ -171,8 +173,6 @@ Rules are defined as objects in `compuute-scan.js`:
   severity: 'high',
   owasp: 'A03:2021 Injection',
   nis2: 'Art. 21(2)(e)',
-  gdpr: 'Art. 5(1)(c) — Data minimisation',  // optional
-  dora: 'Art. 6(8) — Data integrity',         // optional
   description: 'What the rule detects',
   recommendation: 'How to fix it',
   test: (line) => /pattern/.test(line),
@@ -181,7 +181,6 @@ Rules are defined as objects in `compuute-scan.js`:
 ```
 
 See [ROADMAP.md](ROADMAP.md) for planned features and language support timeline.
-```
 
 ## Testing
 
@@ -189,7 +188,7 @@ See [ROADMAP.md](ROADMAP.md) for planned features and language support timeline.
 npm test
 ```
 
-The test suite validates detection accuracy against 9 purpose-built vulnerable MCP servers covering all VIGIL layers.
+The test suite validates detection accuracy against purpose-built vulnerable MCP servers.
 
 ## License
 

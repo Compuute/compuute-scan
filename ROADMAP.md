@@ -1,23 +1,30 @@
 # compuute-scan — Roadmap
 
-> Last updated: 2026-04-09
+> Last updated: 2026-04-10
 
 ## Current State (v0.3.0)
 
-**49 security rules** across 5 VIGIL layers, covering **~81% of the MCP ecosystem** by language.
+### Open-Core Model
+
+`compuute-scan` is open source with an open-core business model:
+
+| Tier | Layers | Rules | What You Get |
+|---|---|---|---|
+| **Open Source** (this repo) | L0 + L1 | 22 | Discovery, sandboxing, code execution risks |
+| **[Compuute Professional Audit](https://compuute.se/audit)** | L0–L4 | 49 | Full assessment + OWASP/NIS2/GDPR/DORA compliance mapping |
 
 ### Language Support
 
-| Language | Ecosystem Share | Status | Rules |
+| Language | Ecosystem Share | Status | Availability |
 |---|---|---|---|
-| TypeScript/JavaScript | 40.4% | **Full** | All 42 rules apply |
-| Python | 35.0% | **Full** | 10 Python-specific rules + all general rules |
-| Go | 6.2% | **Full** | Go-specific rules + all general rules |
+| TypeScript/JavaScript | 40.4% | **Full** | Open Source |
+| Python | 35.0% | **Full** | Open Source |
+| Go | 6.2% | **Full** | Open Source |
 | Rust | 3.3% | Planned | — |
 | C# | 1.9% | Planned | — |
 | Java/Kotlin | 2.0% | Planned | — |
 
-### Compliance Coverage
+### Compliance Coverage (Professional Audit)
 
 | Framework | Coverage | Detail |
 |---|---|---|
@@ -54,18 +61,17 @@ Based on ecosystem analysis (April 2026):
 - Unpinned git dependency detection
 - ReDoS pattern detection
 
-### v0.3.0 — PII/GDPR, Python & Go Support (current)
-- **49 rules** (21 new)
-- **PII/GDPR rules**: L2-005 (PII storage), L2-006 (PII logging), L2-007 (no PII mechanism), L3-010 (PII in tool responses)
-- **Compliance gap closure**: OWASP A02 (crypto), A05 (CORS/headers), GDPR Art. 5(1)(e) (retention)
-- **Full Python support**: pickle, YAML unsafe load, f-string SQL injection, SSL bypass, insecure random, Starlette CORS, hardcoded DB strings, JWT verify bypass
-- **Full Go support**: exec.Command, template injection, sql.Exec with Sprintf, TLS skip, hardcoded secrets, Go CORS wildcard
-- **Enhanced L0 Discovery**: Python/Go transport detection, pyproject.toml/go.mod parsing, tool counting for FastMCP/@mcp.tool/Go handlers
-- GDPR (Art. 5, 25) and DORA (Art. 6) mappings on all PII/data rules
+### v0.3.0 — Open-Core Split, Python & Go Support (current)
+- **Open-core model**: L0-L1 open source, L2-L4 in Professional Audit
+- **49 total rules** (22 open source, 27 professional)
+- **Full Python support**: pickle, YAML unsafe load, f-string SQL injection, SSL bypass, insecure random, Starlette CORS
+- **Full Go support**: exec.Command, template injection, sql.Exec with Sprintf, TLS skip, Go CORS wildcard
+- **Enhanced L0 Discovery**: Python/Go transport detection, pyproject.toml/go.mod parsing, tool counting
+- Upgrade CTA in markdown, JSON, and SARIF output
 
 ---
 
-## Planned
+## Planned (Open Source)
 
 ### v0.4.0 — Enhanced Detection Quality
 
@@ -94,13 +100,15 @@ Based on ecosystem analysis (April 2026):
 - [ ] **License compliance** — Flag copyleft licenses in commercial projects
 - [ ] `go.sum` / `package-lock.json` / `poetry.lock` integrity verification
 
-### v0.7.0 — Enterprise & SaaS
+---
 
-- [ ] **Multi-repo batch scanning** — Scan a GitHub org's MCP servers in one run
-- [ ] **Baseline/diff mode** — Only report new findings since last scan
-- [ ] **HTML report** with interactive severity filtering
-- [ ] **API mode** — Run as HTTP service for integration with security dashboards
-- [ ] **Custom compliance frameworks** — Define your own mappings beyond OWASP/NIS2/GDPR/DORA
+## Planned (Professional Audit)
+
+### Continuous Enhancement
+- Expanded L2-L4 rule coverage for new frameworks and patterns
+- Full compliance report generation (OWASP, NIS2, GDPR, DORA)
+- Multi-repo batch scanning for enterprise customers
+- Baseline/diff mode — only report new findings since last scan
 
 ---
 

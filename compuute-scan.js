@@ -612,569 +612,19 @@ const L1_NEGATIVE_RULES = [
   },
 ];
 
-// ─────────────────────────────────────────────
-// Security Rules — L2: AUTHORIZATION
-// ─────────────────────────────────────────────
-
-const L2_RULES = [
-  {
-    id: 'L2-001',
-    title: 'Hardcoded API key / secret / token',
-    layer: 'L2',
-    severity: 'high',
-    owasp: 'A07:2021 Identification and Authentication Failures',
-    nis2: 'Art. 21(2)(f) — Security in acquisition, development and maintenance',
-    description: 'Secrets hardcoded in source code can be extracted by anyone with code access. Use environment variables or a secrets manager.',
-    recommendation: 'Store secrets in environment variables (process.env / os.environ). Use a secrets manager (AWS SM, HashiCorp Vault) for production.',
-    test: (line) => {
-      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*#/.test(line)) return false;
-      // key/secret/token/password followed by = or : and a string 20+ chars
-      const m = line.match(/(key|secret|token|password|apiKey|api_key|API_KEY|SECRET|TOKEN|PASSWORD)\s*[:=]\s*['"`]([^'"`]{20,})[`'"]/i);
-      if (m) {
-        const val = m[2];
-        // Exclude obvious placeholders
-        if (/^(your[_-]|xxx|placeholder|changeme|CHANGE|TODO|INSERT|REPLACE|<)/i.test(val)) return false;
-        // Exclude process.env references
-        if (/process\.env|os\.environ|getenv|os\.Getenv|viper\.Get/.test(line)) return false;
-        return true;
-      }
-      return false;
-    },
-    guards: [/process\.env/, /os\.environ/, /getenv/, /os\.Getenv/, /viper/i, /godotenv/i, /envconfig/i, /vault/i, /secrets?\s*manager/i],
-  },
-  {
-    id: 'L2-004',
-    title: 'JWT without expiry check',
-    layer: 'L2',
-    severity: 'medium',
-    owasp: 'A07:2021 Identification and Authentication Failures',
-    nis2: 'Art. 21(2)(f) — Security in acquisition, development and maintenance',
-    description: 'JWT tokens without expiry can be used indefinitely if compromised.',
-    recommendation: 'Always set expiresIn/exp when signing JWTs and verify expiry on the server side.',
-    test: (line) => {
-      if (/^\s*\/\//.test(line) || /^\s*#/.test(line)) return false;
-      return /jwt\.sign\s*\(/.test(line);
-    },
-    guards: [/expiresIn/, /\bexp\b/, /maxAge/, /expires/],
-  },
-  {
-    id: 'L2-010',
-    title: 'Hardcoded database connection string with credentials',
-    layer: 'L2',
-    severity: 'high',
-    owasp: 'A07:2021 Identification and Authentication Failures',
-    nis2: 'Art. 21(2)(f) — Security in acquisition, development and maintenance',
-    description: 'Database connection strings with embedded usernames and passwords in source code can be extracted by anyone with code access.',
-    recommendation: 'Store connection strings in environment variables or a secrets manager. Use os.environ/process.env to load credentials at runtime.',
-    test: (line) => {
-      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*#/.test(line)) return false;
-      // postgresql://user:pass@host, mongodb://user:pass@host, redis://:pass@host, mysql://user:pass@host
-      const m = line.match(/(DATABASE_URL|MONGO_URI|REDIS_URL|DB_URL|DSN|CONNECTION_STRING|SQLALCHEMY_DATABASE_URI)\s*[:=]\s*['"`](.*?)['"`]/i);
-      if (m && /\w+:\/\/\w+:\w+@/.test(m[2])) return true;
-      // Inline connection strings without variable name
-      if (/['"`](postgres(ql)?|mongodb(\+srv)?|mysql|redis):\/\/\w+:[^'"`\s]{4,}@/.test(line)) {
-        if (/process\.env|os\.environ|getenv|BaseSettings/.test(line)) return false;
-        return true;
-      }
-      return false;
-    },
-    guards: [/process\.env/, /os\.environ/, /os\.getenv/, /getenv/, /BaseSettings/i, /vault/i, /secrets?\s*manager/i],
-  },
-  {
-    id: 'L2-011',
-    title: 'JWT decoded without signature verification',
-    layer: 'L2',
-    severity: 'high',
-    owasp: 'A07:2021 Identification and Authentication Failures',
-    nis2: 'Art. 21(2)(f) — Security in acquisition, development and maintenance',
-    description: 'Decoding JWTs without verifying the signature allows attackers to forge tokens with arbitrary claims. This bypasses all authentication.',
-    recommendation: 'Always verify JWT signatures. In Python: jwt.decode(token, key, algorithms=["HS256"]). Never set verify=False or options={"verify_signature": False}.',
-    test: (line) => {
-      if (/^\s*\/\//.test(line) || /^\s*#/.test(line)) return false;
-      // Python: jwt.decode(..., verify=False) or options={"verify_signature": False}
-      if (/jwt\.decode\s*\(/.test(line) && /verify\s*[=:]\s*False/.test(line)) return true;
-      if (/jwt\.decode\s*\(/.test(line) && /verify_signature.*False/.test(line)) return true;
-      // Node: jwt.decode (not jwt.verify) — decode doesn't verify
-      if (/jwt\.decode\s*\(/.test(line) && !/jwt\.verify/.test(line)) {
-        // Only flag if it looks like it's used for auth decisions
-        if (/\b(auth|user|role|permission|admin|access)\b/i.test(line)) return true;
-      }
-      return false;
-    },
-    guards: [/jwt\.verify/, /algorithms\s*=/, /verify\s*=\s*True/, /verify_signature.*True/],
-  },
-  {
-    id: 'L2-005',
-    title: 'PII pattern stored or processed without redaction',
-    layer: 'L2',
-    severity: 'high',
-    owasp: 'A04:2021 Insecure Design',
-    nis2: 'Art. 21(2)(f) — Security in acquisition, development and maintenance',
-    dora: 'Art. 6(8) — Data integrity and confidentiality',
-    gdpr: 'Art. 5(1)(c) — Data minimisation; Art. 5(1)(e) — Storage limitation',
-    description: 'Code stores, writes, or persists data matched by PII patterns (e.g., email, SSN, credit card) without redaction. GDPR Art. 5(1)(c) requires data minimisation — only process personal data that is strictly necessary.',
-    recommendation: 'Apply PII redaction (masking, hashing, or tokenisation) before storing or transmitting user-provided text. Use a PII detection library or MCP PII tool (pii.redact) in the data pipeline.',
-    test: (line) => {
-      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*#/.test(line)) return false;
-      // Detect storing/writing/inserting data that matches PII field names without redaction nearby
-      const hasPiiField = /\b(email|ssn|social.?security|tax.?id|credit.?card|card.?number|phone.?number|personal.?number|personnummer|passport.?number|iban|date.?of.?birth|national.?id)\b/i.test(line);
-      const hasStorage = /\b(save|store|write|insert|put|push|append|create|update|set)\s*\(/i.test(line);
-      if (hasPiiField && hasStorage) return true;
-      // Direct DB writes with PII field names
-      const hasDbOp = /\.(save|create|insert|update|upsert|findAndUpdate|bulkWrite|add)\s*\(/.test(line);
-      if (hasPiiField && hasDbOp) return true;
-      return false;
-    },
-    guards: [/redact/i, /mask/i, /anonymi[sz]e/i, /hash/i, /encrypt/i, /tokenize/i, /pii/i, /sanitize.*pii/i, /gdpr/i],
-  },
-  {
-    id: 'L2-006',
-    title: 'PII logged without masking',
-    layer: 'L2',
-    severity: 'high',
-    owasp: 'A09:2021 Security Logging and Monitoring Failures',
-    nis2: 'Art. 21(2)(g) — Audit and monitoring',
-    dora: 'Art. 6(8) — Data integrity and confidentiality',
-    gdpr: 'Art. 5(1)(c) — Data minimisation; Art. 5(1)(f) — Integrity and confidentiality',
-    description: 'PII fields are passed to logging functions without masking. Log files often have broader access than production databases, making unmasked PII a compliance risk under GDPR Art. 5(1)(f).',
-    recommendation: 'Mask or redact PII before logging. Use structured logging with a PII-safe serialiser that automatically redacts sensitive fields.',
-    test: (line) => {
-      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*#/.test(line)) return false;
-      const hasPiiField = /\b(email|ssn|social.?security|tax.?id|credit.?card|card.?number|phone.?number|personnummer|passport.?number|iban|national.?id)\b/i.test(line);
-      const hasLog = /\b(console\.(log|info|warn|error|debug)|logger?\.(log|info|warn|error|debug)|log\.(info|warn|error|debug)|logging\.(info|warn|error|debug)|print)\s*\(/i.test(line);
-      return hasPiiField && hasLog;
-    },
-    guards: [/redact/i, /mask/i, /sanitize/i, /\*{3,}/, /pii/i, /scrub/i],
-  },
-  {
-    id: 'L2-008',
-    title: 'Weak cryptographic hash used for security purpose',
-    layer: 'L2',
-    severity: 'high',
-    owasp: 'A02:2021 Cryptographic Failures',
-    nis2: 'Art. 21(2)(h) — Cryptography and encryption',
-    description: 'MD5 and SHA-1 are cryptographically broken. Using them for password hashing, token generation, or integrity checks enables collision and preimage attacks.',
-    recommendation: 'Use SHA-256/SHA-3 for integrity checks. Use bcrypt, scrypt, or argon2 for password hashing. Never use MD5 or SHA-1 for any security-relevant purpose.',
-    test: (line) => {
-      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*#/.test(line)) return false;
-      // Node.js: createHash('md5') or createHash('sha1')
-      if (/createHash\s*\(\s*['"`](md5|sha-?1)['"`]\s*\)/i.test(line)) return true;
-      // Python: hashlib.md5( or hashlib.sha1(
-      if (/hashlib\.(md5|sha1)\s*\(/.test(line)) return true;
-      // Go: md5.New(), md5.Sum(), sha1.New(), sha1.Sum()
-      if (/\b(md5|sha1)\.(New|Sum)\s*\(/.test(line)) return true;
-      // Go: import "crypto/md5" or "crypto/sha1"
-      if (/["']crypto\/(md5|sha1)["']/.test(line)) return true;
-      // Direct MD5/SHA1 function calls
-      if (/\b(md5|sha1)\s*\(/i.test(line) && !/^\s*(import|require|const|let|var|from)\b/.test(line)) return true;
-      return false;
-    },
-    guards: [/sha256/i, /sha384/i, /sha512/i, /sha3/i, /bcrypt/i, /scrypt/i, /argon2/i, /pbkdf2/i, /checksum/i, /etag/i, /cache/i],
-  },
-  {
-    id: 'L2-009',
-    title: 'Data storage without TTL or retention policy',
-    layer: 'L2',
-    severity: 'medium',
-    owasp: 'A04:2021 Insecure Design',
-    nis2: 'Art. 21(2)(f) — Security in acquisition, development and maintenance',
-    dora: 'Art. 6(8) — Data integrity and confidentiality',
-    gdpr: 'Art. 5(1)(e) — Storage limitation',
-    description: 'Data is written to a database or file store without a TTL, expiry, or retention policy. GDPR Art. 5(1)(e) requires that personal data is kept only as long as necessary for the purpose.',
-    recommendation: 'Set a TTL or expiry on stored records. Implement a data retention policy with automatic cleanup (e.g., TTL indexes in MongoDB, EXPIRE in Redis, scheduled purge jobs).',
-    test: (line) => {
-      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*#/.test(line)) return false;
-      // Database insert/create/save operations
-      const hasDbWrite = /\.(save|create|insert|insertOne|insertMany|put|set|hset|rpush|lpush|sadd|zadd|write)\s*\(/.test(line);
-      // File-based persistence
-      const hasFileWrite = /\b(writeFile|writeFileSync|appendFile|appendFileSync)\s*\(/.test(line);
-      return hasDbWrite || hasFileWrite;
-    },
-    guards: [/ttl/i, /expir/i, /retention/i, /maxAge/i, /deleteAfter/i, /purge/i, /cleanup/i, /createdAt/i, /ttlIndex/i, /EXPIRE/],
-    // Only flag if it looks like persistent storage (near DB/model/store context)
-    contextCheck: (lines, idx) => {
-      const start = Math.max(0, idx - 10);
-      const end = Math.min(lines.length - 1, idx + 10);
-      for (let i = start; i <= end; i++) {
-        if (/\b(mongo|mongoose|sequelize|prisma|knex|redis|typeorm|drizzle|firebase|supabase|dynamodb|collection|model|repository|store|database|db)\b/i.test(lines[i])) return true;
-      }
-      return false;
-    },
-  },
-];
-
-// Negative check rules for L2 (whole-codebase checks)
-const L2_NEGATIVE_RULES = [
-  {
-    id: 'L2-002',
-    title: 'No authentication mechanism detected',
-    layer: 'L2',
-    severity: 'medium',
-    owasp: 'A07:2021 Identification and Authentication Failures',
-    nis2: 'Art. 21(2)(c) — Access control policies',
-    description: 'No authentication mechanism was found in the codebase. MCP servers should authenticate clients to prevent unauthorized access.',
-    recommendation: 'Implement authentication using JWT, OAuth, API keys, or another mechanism appropriate for your transport.',
-    pattern: /\b(auth|authenticate|requireAuth|jwt|oauth|bearer|api[-_]?key|apiKey|token.*verify|verifyToken|passport|session|login|BearerAuthBackend|RequireAuthMiddleware|TokenVerifier|AuthConfig|google\.oauth2|AuthMiddleware|jwtauth|go-jwt|casbin)\b/i,
-  },
-  {
-    id: 'L2-003',
-    title: 'No RBAC / permission system detected',
-    layer: 'L2',
-    severity: 'medium',
-    owasp: 'A01:2021 Broken Access Control',
-    nis2: 'Art. 21(2)(c) — Access control policies',
-    description: 'No role-based access control or permission system was found. Tools should be restricted based on user roles.',
-    recommendation: 'Implement role-based tool access. Define which roles can invoke which tools. Use a deny-by-default policy.',
-    pattern: /\b(role|permission|rbac|canAccess|authorize|isAllowed|filter.*tag|defaultDeny|access.*control)\b/i,
-  },
-  {
-    id: 'L2-007',
-    title: 'No PII detection or redaction mechanism detected',
-    layer: 'L2',
-    severity: 'medium',
-    owasp: 'A04:2021 Insecure Design',
-    nis2: 'Art. 21(2)(f) — Security in acquisition, development and maintenance',
-    dora: 'Art. 6(8) — Data integrity and confidentiality',
-    gdpr: 'Art. 5(1)(c) — Data minimisation; Art. 25 — Data protection by design and by default',
-    description: 'No PII detection, redaction, or masking mechanism was found in the codebase. MCP servers that process user-provided text risk leaking personal data (names, emails, tax IDs, credit cards) in tool responses, logs, or downstream storage — violating GDPR Art. 5(1)(c) data minimisation and Art. 25 data protection by design.',
-    recommendation: 'Integrate a PII redaction layer before storing or returning user-provided text. Options: (1) use an MCP PII server (pii.redact) in the pipeline, (2) add a library like presidio, pii-redactor, or dlp, (3) implement regex-based redaction for your jurisdiction\'s ID formats.',
-    pattern: /\b(pii|redact|anonymi[sz]e|mask.*pii|scrub.*pii|data.?minimi[sz]|gdpr.*redact|personnummer|detect.*pii|pii.*detect|dlp|presidio|pii[-_]?redact)/i,
-  },
-];
 
 // ─────────────────────────────────────────────
-// Security Rules — L3: TOOL INTEGRITY
+// L2-L4 rules available in Compuute Professional Audit
+// https://compuute.se/audit
 // ─────────────────────────────────────────────
 
-const L3_RULES = [
-  {
-    id: 'L3-001',
-    title: 'JSON.stringify as direct tool response',
-    layer: 'L3',
-    severity: 'high',
-    owasp: 'A04:2021 Insecure Design',
-    nis2: 'Art. 21(2)(e) — Secure development',
-    description: 'Serializing raw data as a tool response can leak internal fields, database IDs, or sensitive properties.',
-    recommendation: 'Use a presenter, DTO, or explicit field selection (pick/omit) to control exactly which fields are exposed in tool responses.',
-    test: (line) => {
-      if (/^\s*\/\//.test(line) || /^\s*#/.test(line)) return false;
-      return /JSON\.stringify\s*\(/.test(line);
-    },
-    guards: [/Presenter/i, /schema/i, /\bpick\b/, /\bomit\b/, /redact/i, /sanitize/i, /toJSON/],
-    // Check 5-line window for content/text/return to confirm it's a response
-    contextCheck: (lines, idx) => {
-      const start = Math.max(0, idx - 5);
-      const end = Math.min(lines.length - 1, idx + 5);
-      for (let i = start; i <= end; i++) {
-        if (/\bcontent\b|\btext\b|\breturn\b|\bresponse\b/.test(lines[i])) return true;
-      }
-      return false;
-    },
-  },
-  {
-    id: 'L3-003',
-    title: 'Tool description exceeds 200 characters',
-    layer: 'L3',
-    severity: 'medium',
-    owasp: 'A04:2021 Insecure Design',
-    nis2: 'Art. 21(2)(e) — Secure development',
-    description: 'Excessively long tool descriptions can be used to inject hidden instructions for the LLM (prompt injection via tool metadata).',
-    recommendation: 'Keep tool descriptions concise (<200 chars). Review long descriptions for embedded instructions or misleading content.',
-    test: (line) => {
-      const m = line.match(/description\s*[:=]\s*['"`](.{200,})[`'"]/);
-      if (m) return true;
-      // Also check template literal descriptions
-      const m2 = line.match(/description\s*[:=]\s*`(.{200,})`/);
-      return !!m2;
-    },
-    guards: [],
-  },
-  {
-    id: 'L3-004',
-    title: 'HTTP request to user-controlled URL (SSRF)',
-    layer: 'L3',
-    severity: 'high',
-    owasp: 'A10:2021 Server-Side Request Forgery',
-    nis2: 'Art. 21(2)(e) — Secure development',
-    description: 'Making HTTP requests to user-supplied URLs enables Server-Side Request Forgery. Attackers can probe internal networks.',
-    recommendation: 'Validate and whitelist allowed URLs/domains. Block requests to private IP ranges (10.x, 172.16-31.x, 192.168.x, 127.x).',
-    test: (line) => {
-      if (/^\s*\/\//.test(line) || /^\s*#/.test(line)) return false;
-      // fetch, axios, requests.get/post with a variable (not literal URL)
-      if (/\bfetch\s*\(/.test(line) && !/\bfetch\s*\(\s*['"`]http/.test(line)) return true;
-      if (/axios\.(get|post|put|delete|request)\s*\(/.test(line) && !/axios\.\w+\s*\(\s*['"`]http/.test(line)) return true;
-      if (/requests\.(get|post|put|delete)\s*\(/.test(line) && !/requests\.\w+\s*\(\s*['"`]http/.test(line)) return true;
-      if (/httpx\.(get|post|put|delete)\s*\(/.test(line) && !/httpx\.\w+\s*\(\s*['"`]http/.test(line)) return true;
-      return false;
-    },
-    guards: [/whitelist/i, /allowlist/i, /allowedUrl/i, /allowedHost/i, /validateUrl/i, /isPrivateIp/i, /block.*private/i],
-  },
-  {
-    id: 'L3-005',
-    title: 'SQL string concatenation (injection risk)',
-    layer: 'L3',
-    severity: 'high',
-    owasp: 'A03:2021 Injection',
-    nis2: 'Art. 21(2)(e) — Secure development',
-    description: 'Concatenating user input into SQL queries enables SQL injection attacks.',
-    recommendation: 'Use parameterized queries (prepared statements) or an ORM. Never concatenate user input into SQL strings.',
-    test: (line) => {
-      if (/^\s*\/\//.test(line) || /^\s*#/.test(line)) return false;
-      // Require SQL keywords in a SQL-specific context
-      // SELECT must be followed by SQL tokens (*, FROM, column patterns)
-      // INSERT must be followed by INTO
-      // UPDATE must be followed by SET or table name pattern
-      // DELETE must be followed by FROM
-      const sqlPatterns = [
-        /SELECT\s+(\*|[\w.]+\s*,|\w+\s+FROM)\s/,
-        /INSERT\s+INTO\s/,
-        /UPDATE\s+\w+\s+SET\s/,
-        /DELETE\s+FROM\s/,
-      ];
-      const hasSql = sqlPatterns.some(p => p.test(line));
-      if (!hasSql) return false;
-      // Check for concatenation (+) or template literal with variable
-      if (/\+\s*\w/.test(line) || /\$\{/.test(line) || /f['"].*\{/.test(line) || /%s/.test(line)) return true;
-      return false;
-    },
-    guards: [/parameterized/i, /prepared/i, /placeholder/, /\$\d/, /\?/, /bind/i],
-  },
-  {
-    id: 'L3-006',
-    title: 'SKILL.md loaded without integrity check',
-    layer: 'L3',
-    severity: 'medium',
-    owasp: 'A08:2021 Software and Data Integrity Failures',
-    nis2: 'Art. 21(2)(e) — Secure development',
-    description: 'Loading skill definitions without hash verification allows tampering with tool behavior.',
-    recommendation: 'Verify SKILL.md file integrity using a cryptographic hash (SHA-256) before loading.',
-    test: (line) => {
-      if (/^\s*\/\//.test(line) || /^\s*#/.test(line)) return false;
-      return (/readFile.*skill/i.test(line) || /loadSkill/i.test(line) || /SKILL\.md/i.test(line));
-    },
-    guards: [/verify/i, /hash/i, /integrity/i, /sha256/i, /checksum/i, /crypto/i],
-  },
-  {
-    id: 'L3-007',
-    title: 'Prompt injection in tool description',
-    layer: 'L3',
-    severity: 'high',
-    owasp: 'A03:2021 Injection',
-    nis2: 'Art. 21(2)(e) — Secure development',
-    description: 'Tool descriptions containing instruction-like patterns (e.g., "ignore previous", "system:", hidden directives) can manipulate LLM behavior via prompt injection.',
-    recommendation: 'Keep tool descriptions factual and short. Never embed instructions, system prompts, or behavioral directives in tool metadata.',
-    test: (line) => {
-      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*#/.test(line)) return false;
-      // Must be in a description context
-      if (!/description/i.test(line)) return false;
-      // Check for injection patterns in the description value
-      const injectionPatterns = [
-        /ignore\s+(previous|prior|above|all)/i,
-        /forget\s+(previous|prior|your|all)/i,
-        /\bsystem\s*:/i,
-        /<\s*SYSTEM\s*>/i,
-        /you\s+(are|must|should|will)\b/i,
-        /do\s+not\s+(reveal|share|tell|mention)/i,
-        /\[INST\]/i,
-        /<<\s*SYS\s*>>/i,
-        /IMPORTANT\s*:/i,
-        /override/i,
-      ];
-      return injectionPatterns.some(p => p.test(line));
-    },
-    guards: [/sanitize/i, /escape/i, /filter/i, /validate/i],
-  },
-  {
-    id: 'L3-008',
-    title: 'npm lifecycle script (supply chain risk)',
-    layer: 'L3',
-    severity: 'medium',
-    owasp: 'A08:2021 Software and Data Integrity Failures',
-    nis2: 'Art. 21(2)(e) — Secure development',
-    description: 'npm preinstall/postinstall scripts execute automatically during npm install. Malicious packages use these hooks to run arbitrary code on the developer machine.',
-    recommendation: 'Audit all preinstall/postinstall scripts. Use --ignore-scripts for untrusted packages. Consider using npm config set ignore-scripts true globally.',
-    test: (line) => {
-      if (/^\s*\/\//.test(line) || /^\s*#/.test(line)) return false;
-      return /["'](preinstall|postinstall|preuninstall|postuninstall)["']\s*:/.test(line);
-    },
-    guards: [/husky/i, /lint-staged/i, /prepare/i],
-  },
-  {
-    id: 'L3-009',
-    title: 'Unpinned git dependency (rug-pull risk)',
-    layer: 'L3',
-    severity: 'high',
-    owasp: 'A08:2021 Software and Data Integrity Failures',
-    nis2: 'Art. 21(2)(e) — Secure development',
-    description: 'Dependencies pointing to git URLs without a pinned commit hash can be changed by the repo owner at any time (rug-pull). The next npm install may pull malicious code.',
-    recommendation: 'Pin git dependencies to a specific commit hash: "package": "git+https://github.com/org/repo.git#abc123". Prefer npm registry packages with lockfile pinning.',
-    test: (line) => {
-      if (/^\s*\/\//.test(line) || /^\s*#/.test(line)) return false;
-      // git+https:// or git+ssh:// or github: without a commit hash (#sha)
-      if (/["']git\+(https|ssh):\/\//.test(line) && !/#[0-9a-f]{7,40}/.test(line)) return true;
-      if (/["']github:/.test(line) && !/#[0-9a-f]{7,40}/.test(line)) return true;
-      return false;
-    },
-    guards: [/#[0-9a-f]{7,40}/, /integrity/i, /commit/i],
-  },
-  {
-    id: 'L3-010',
-    title: 'User-provided text returned in tool response without PII redaction',
-    layer: 'L3',
-    severity: 'high',
-    owasp: 'A04:2021 Insecure Design',
-    nis2: 'Art. 21(2)(e) — Secure development',
-    dora: 'Art. 6(8) — Data integrity and confidentiality',
-    gdpr: 'Art. 5(1)(c) — Data minimisation; Art. 5(1)(b) — Purpose limitation',
-    description: 'Tool responses that echo back or include user-provided text (e.g., body, message, content, query, input) may leak PII to downstream consumers, logs, or LLM context windows. GDPR Art. 5(1)(c) requires that only necessary personal data is processed.',
-    recommendation: 'Apply PII redaction before including user-provided text in tool responses. Use a PII scanning/redaction step (pii.redact, presidio, or regex-based masking) on any user-sourced content before returning it.',
-    test: (line) => {
-      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*#/.test(line)) return false;
-      // Detect content/text fields in tool responses that reference user-input variables
-      const isToolResponse = /\b(content|text)\s*[:=]/.test(line) && /\b(body|message|input|query|userText|user_text|userData|user_data|user_input|rawText|raw_text|originalText|original_text)\b/.test(line);
-      return isToolResponse;
-    },
-    guards: [/redact/i, /mask/i, /sanitize/i, /pii/i, /anonymi[sz]e/i, /scrub/i, /clean/i, /strip.*pii/i],
-    // Only flag if near a return/response context
-    contextCheck: (lines, idx) => {
-      const start = Math.max(0, idx - 5);
-      const end = Math.min(lines.length - 1, idx + 5);
-      for (let i = start; i <= end; i++) {
-        if (/\breturn\b|\bresponse\b|\bcallTool\b|\bhandle\b|\btool\b/i.test(lines[i])) return true;
-      }
-      return false;
-    },
-  },
-];
-
-// Negative check rules for L3
-const L3_NEGATIVE_RULES = [
-  {
-    id: 'L3-002',
-    title: 'No input validation library detected',
-    layer: 'L3',
-    severity: 'medium',
-    owasp: 'A03:2021 Injection',
-    nis2: 'Art. 21(2)(e) — Secure development',
-    description: 'No input validation framework (zod, joi, yup, ajv, pydantic) was found. Tool inputs should be validated against a schema.',
-    recommendation: 'Add input validation using zod, joi, yup, ajv (Node.js) or pydantic BaseModel/Field (Python), or use inputSchema with required fields in MCP tool definitions.',
-    pattern: /\b(zod|joi|yup|ajv|schema.*validate|inputSchema.*required|validateInput|Joi\.object|z\.object|z\.string|z\.number|pydantic|BaseModel|Field\s*\(|Annotated\s*\[|marshmallow)\b/i,
-  },
-];
-
-// ─────────────────────────────────────────────
-// Security Rules — L4: MONITORING
-// ─────────────────────────────────────────────
-
-const L4_RULES = [
-  {
-    id: 'L4-002',
-    title: 'console.log used as primary logging',
-    layer: 'L4',
-    severity: 'low',
-    owasp: 'A09:2021 Security Logging and Monitoring Failures',
-    nis2: 'Art. 21(2)(g) — Audit and monitoring',
-    description: 'console.log provides no log levels, rotation, or structured output. Use a proper logging framework in production.',
-    recommendation: 'Use a structured logging library (winston, pino, bunyan) with log levels and optional file output.',
-    test: (line) => {
-      if (/^\s*\/\//.test(line) || /^\s*#/.test(line)) return false;
-      return /console\.(log|error|warn|info)\s*\(/.test(line);
-    },
-    guards: [],
-    // This is a count-based rule - we count occurrences and only report if > 5
-    countThreshold: 5,
-  },
-  {
-    id: 'L4-003',
-    title: 'Error details leaked to client',
-    layer: 'L4',
-    severity: 'medium',
-    owasp: 'A04:2021 Insecure Design',
-    nis2: 'Art. 21(2)(e) — Secure development',
-    description: 'Exposing stack traces or internal error messages to clients reveals implementation details useful to attackers.',
-    recommendation: 'Return generic error messages to clients. Log detailed errors server-side only.',
-    test: (line) => {
-      if (/^\s*\/\//.test(line) || /^\s*#/.test(line)) return false;
-      // stack/stackTrace/e.message in a return/content/response context
-      if (/\b(stack|stackTrace|e\.message|err\.message|error\.message)\b/.test(line)) {
-        if (/\b(content|text|return|response|send|json)\b/.test(line)) return true;
-      }
-      return false;
-    },
-    guards: [/production/i, /NODE_ENV/, /sanitizeError/i],
-  },
-  {
-    id: 'L4-004',
-    title: 'Silent error swallowing',
-    layer: 'L4',
-    severity: 'medium',
-    owasp: 'A09:2021 Security Logging and Monitoring Failures',
-    nis2: 'Art. 21(2)(g) — Audit and monitoring',
-    description: 'Empty catch blocks silently swallow errors, hiding security-relevant failures from operators.',
-    recommendation: 'Always log caught errors, even if you handle them gracefully. At minimum, log at warning level.',
-    // This is checked via multi-line context, not single-line
-    test: null,
-    multiLineTest: (lines, idx) => {
-      const line = lines[idx];
-      if (!/\bcatch\b/.test(line)) return false;
-      // Look at next 1-3 lines for empty body
-      const nextLines = lines.slice(idx + 1, idx + 4).join(' ').trim();
-      if (/^\s*\}\s*$/.test(nextLines) || /^\s*$/.test(nextLines)) return true;
-      // Catch with only console.log
-      if (/^\s*console\.(log|error)\s*\(/.test(nextLines) && /\}\s*$/.test(nextLines)) return true;
-      return false;
-    },
-    guards: [],
-  },
-];
-
-// Negative check rules for L4
-const L4_NEGATIVE_RULES = [
-  {
-    id: 'L4-001',
-    title: 'No audit / telemetry in codebase',
-    layer: 'L4',
-    severity: 'medium',
-    owasp: 'A09:2021 Security Logging and Monitoring Failures',
-    nis2: 'Art. 21(2)(g) — Audit and monitoring',
-    description: 'No audit logging or telemetry was detected. MCP tool invocations should be logged for security monitoring and incident response.',
-    recommendation: 'Implement audit logging for all tool invocations. Log: who called what tool, when, with which arguments, and the outcome.',
-    pattern: /\b(audit|telemetry|log.*tool|log.*action|monitor|trace.*call|opentelemetry|AuditTrail|auditLog|structlog|loguru|logging\.getLogger)\b/i,
-  },
-  {
-    id: 'L4-005',
-    title: 'No rate limiting detected',
-    layer: 'L4',
-    severity: 'low',
-    owasp: 'A04:2021 Insecure Design',
-    nis2: 'Art. 21(2)(d) — Network security',
-    description: 'No rate limiting mechanism was found. MCP servers exposed over HTTP should limit request rates to prevent abuse.',
-    recommendation: 'Implement rate limiting using a middleware (express-rate-limit, slowapi) or at the gateway/proxy level.',
-    pattern: /\b(rateLimit|throttle|rateLimiter|slowapi|express.rate.limit|rate.limit)\b/i,
-  },
-];
-
-const L4_RULES_EXTRA = [
-  {
-    id: 'L4-006',
-    title: 'ReDoS pattern (regex denial of service)',
-    layer: 'L4',
-    severity: 'medium',
-    owasp: 'A04:2021 Insecure Design',
-    nis2: 'Art. 21(2)(d) — Network security',
-    description: 'Regular expressions with nested quantifiers (e.g., (a+)+, (a*)*) are vulnerable to catastrophic backtracking. Malicious input can cause the regex engine to hang, enabling denial-of-service.',
-    recommendation: 'Rewrite the regex to avoid nested quantifiers. Use atomic groups or possessive quantifiers where supported. Consider using re2 or a regex engine with linear-time guarantees.',
-    test: (line) => {
-      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*#/.test(line)) return false;
-      // Detect nested quantifiers: (x+)+, (x*)+, (x+)*, (x*)*
-      if (/\([^)]*[+*][^)]*\)[+*{]/.test(line)) return true;
-      // Overlapping alternation with quantifiers: (a|a)+
-      if (/\([^)]*\|[^)]*\)[+*{]/.test(line) && /(\w)\|.*\1/.test(line)) return true;
-      return false;
-    },
-    guards: [/re2/i, /timeout/i, /safe.regex/i, /linear/i],
-  },
-];
+const L2_RULES = [];
+const L2_NEGATIVE_RULES = [];
+const L3_RULES = [];
+const L3_NEGATIVE_RULES = [];
+const L4_RULES = [];
+const L4_NEGATIVE_RULES = [];
+const L4_RULES_EXTRA = [];
 
 // ─────────────────────────────────────────────
 // L0: DISCOVERY
@@ -1576,8 +1026,15 @@ function generateMarkdownReport(repoPath, findings, discovery, durationMs) {
 
   // Footer
   md += `---\n\n`;
-  md += `> This scan automates pattern detection. Professional judgment and manual review are required for a complete NIS2/DORA assessment. Contact: daniel@compuute.se\n\n`;
-  md += `*Generated by compuute-scan v${VERSION} | Compuute AB*\n`;
+  md += `## Full Security Assessment\n\n`;
+  md += `This scan covers **L0 Discovery + L1 Sandboxing** (${findings.length} findings).\n\n`;
+  md += `Production MCP deployments need deeper analysis:\n\n`;
+  md += `- **L2 Authorization** — RBAC, secret management, JWT/OAuth, PII/GDPR compliance\n`;
+  md += `- **L3 Tool Integrity** — SSRF, injection, prompt poisoning, supply chain\n`;
+  md += `- **L4 Runtime Monitoring** — audit logging, rate limiting, error leakage\n\n`;
+  md += `**49 rules. OWASP LLM Top 10 (10/10). NIS2 Art. 21 (7/7). DORA. GDPR (6/6).**\n\n`;
+  md += `> [Book a Compuute Security Assessment](https://compuute.se/audit)\n\n`;
+  md += `*Generated by compuute-scan v${VERSION} (open source) | Compuute AB*\n`;
 
   return md;
 }
@@ -1602,6 +1059,8 @@ function generateJsonReport(repoPath, findings, discovery, durationMs) {
   return JSON.stringify({
     scanner: 'compuute-scan',
     version: VERSION,
+    tier: 'open-source',
+    layersCovered: ['L0', 'L1'],
     repo: repoName,
     date: new Date().toISOString(),
     filesScanned: discovery.totalSourceFiles,
@@ -1610,6 +1069,10 @@ function generateJsonReport(repoPath, findings, discovery, durationMs) {
     layers,
     l0Discovery: discovery,
     findings,
+    upgrade: {
+      message: 'This scan covers L0-L1. Full L2-L4 assessment available with Compuute Professional Audit.',
+      url: 'https://compuute.se/audit',
+    },
   }, null, 2);
 }
 
@@ -1780,6 +1243,13 @@ function main() {
     console.error(`Report written to ${opts.output}`);
   } else {
     console.log(report);
+  }
+
+  // Upgrade notice (stderr so it doesn't pollute report output)
+  if (!opts.json && !opts.sarif) {
+    console.error('');
+    console.error('L0-L1 scan complete. For full L2-L4 assessment + compliance mapping:');
+    console.error('  https://compuute.se/audit');
   }
 
   // Determine exit code
