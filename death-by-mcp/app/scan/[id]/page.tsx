@@ -135,10 +135,10 @@ export default function ScanResultPage() {
       {/* CTA */}
       <div className="max-w-2xl mx-auto rounded-xl border border-mcp-accent/20 bg-mcp-accent/5 p-6 text-center">
         <p className="text-sm text-slate-400 mb-1">
-          This scan covers <strong className="text-slate-200">L0-L1</strong> (Discovery + Sandboxing).
+          This scan covers <strong className="text-slate-200">L0-L1</strong> (pattern matching).
         </p>
         <p className="text-sm text-slate-400 mb-4">
-          For full L2-L4 assessment with OWASP, NIS2, GDPR, and DORA compliance mapping:
+          L2-L4 uses knowledge graph-driven analysis: taint tracking, attack path visualization, OWASP/NIS2/GDPR/DORA compliance.
         </p>
         <a
           href="https://compuute.se/audit"

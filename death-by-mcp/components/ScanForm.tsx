@@ -23,7 +23,7 @@ export default function ScanForm() {
 
     const trimmed = url.trim().replace(/\/+$/, '');
     if (!trimmed) {
-      setError('Enter a GitHub repository URL.');
+      setError('Enter a GitHub, GitLab, or Bitbucket repository URL.');
       setScanning(false);
       return;
     }
@@ -95,7 +95,7 @@ export default function ScanForm() {
         <div className="flex gap-3">
           <input
             type="url"
-            placeholder="https://github.com/org/mcp-server"
+            placeholder="https://github.com/org/mcp-server (also GitLab, Bitbucket)"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             disabled={scanning}

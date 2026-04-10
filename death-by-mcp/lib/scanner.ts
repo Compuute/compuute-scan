@@ -14,7 +14,7 @@ const CLONE_TIMEOUT = 30_000;
 const SCAN_TIMEOUT = 30_000;
 const COMPOSE_FILE = join(process.cwd(), 'docker-compose.scanner.yml');
 
-const GITHUB_URL_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+(\.git)?$/;
+const REPO_URL_RE = /^https:\/\/(github\.com|gitlab\.com|bitbucket\.org)\/[\w.-]+\/[\w.-]+(\.git)?$/;
 
 // Patterns that may contain secrets, credentials, or PII in finding descriptions
 const SECRET_PATTERNS = [
@@ -48,7 +48,7 @@ function redactFinding(finding: ScanFinding): ScanFinding {
 
 export function validateRepoUrl(url: string): string | null {
   const trimmed = url.trim().replace(/\/+$/, '').replace(/\.git$/, '');
-  if (!GITHUB_URL_RE.test(trimmed) && !GITHUB_URL_RE.test(trimmed + '.git')) {
+  if (!REPO_URL_RE.test(trimmed) && !REPO_URL_RE.test(trimmed + '.git')) {
     return null;
   }
   return trimmed;
@@ -143,7 +143,7 @@ function runDockerScan(repoUrl: string, repoName: string): string {
 export async function runScan(repoUrl: string): Promise<ScanResult> {
   const validated = validateRepoUrl(repoUrl);
   if (!validated) {
-    throw new Error('Invalid URL. Only public GitHub repository URLs are accepted.');
+    throw new Error('Invalid URL. Only public GitHub, GitLab, and Bitbucket repository URLs are accepted.');
   }
 
   // Docker is mandatory — no bare-metal fallback for untrusted code

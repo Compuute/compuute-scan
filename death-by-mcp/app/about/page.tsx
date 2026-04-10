@@ -211,10 +211,10 @@ export default function About() {
 
       {/* CTA */}
       <div className="rounded-xl border border-mcp-accent/20 bg-mcp-accent/5 p-8 text-center">
-        <h2 className="text-lg font-bold text-slate-200 mb-2">Full security assessment</h2>
+        <h2 className="text-lg font-bold text-slate-200 mb-2">Knowledge graph-driven security assessment</h2>
         <p className="text-sm text-slate-400 mb-4">
-          49 rules across 5 layers. OWASP Top 10 (10/10). NIS2 (7/7). GDPR (6/6). DORA.
-          Audit-ready compliance reports.
+          49 rules. Full taint tracking. Attack path visualization. OWASP (10/10). NIS2 (7/7). GDPR (6/6). DORA.
+          Not just pattern matching &mdash; traces data flows from user input to dangerous sinks.
         </p>
         <a
           href="https://compuute.se/audit"
