@@ -779,6 +779,27 @@ function runL0Discovery(repoPath, allContent, sourceFiles) {
 // Main Scan Engine
 // ─────────────────────────────────────────────
 
+function makeFinding(rule, file, line, code, guard) {
+  return {
+    id: rule.id,
+    title: rule.title,
+    layer: rule.layer,
+    severity: guard?.mitigated ? downgradeSeverity(rule.severity) : rule.severity,
+    owasp: rule.owasp,
+    nis2: rule.nis2,
+    gdpr: rule.gdpr || null,
+    dora: rule.dora || null,
+    file,
+    line,
+    code,
+    mitigated: guard?.mitigated || false,
+    guardLine: guard?.guardLine || null,
+    guardCode: guard?.guardCode || null,
+    description: rule.description,
+    recommendation: rule.recommendation,
+  };
+}
+
 function scanFile(filePath, repoPath, allRules) {
   const content = readFileSafe(filePath);
   if (!content) return [];
@@ -789,30 +810,12 @@ function scanFile(filePath, repoPath, allRules) {
 
   for (const rule of allRules) {
     if (rule.countThreshold) {
-      // Count-based rule: count all matches, report once if over threshold
       let count = 0;
       for (let i = 0; i < lines.length; i++) {
         if (rule.test && rule.test(lines[i])) count++;
       }
       if (count > rule.countThreshold) {
-        findings.push({
-          id: rule.id,
-          title: rule.title,
-          layer: rule.layer,
-          severity: rule.severity,
-          owasp: rule.owasp,
-          nis2: rule.nis2,
-          gdpr: rule.gdpr || null,
-          dora: rule.dora || null,
-          file: relPath,
-          line: null,
-          code: `${count} occurrences found`,
-          mitigated: false,
-          guardLine: null,
-          guardCode: null,
-          description: rule.description,
-          recommendation: rule.recommendation,
-        });
+        findings.push(makeFinding(rule, relPath, null, `${count} occurrences found`));
       }
       continue;
     }
@@ -827,39 +830,13 @@ function scanFile(filePath, repoPath, allRules) {
       }
 
       if (!matched) continue;
-
-      // Context check (for rules that need nearby context to confirm)
       if (rule.contextCheck && !rule.contextCheck(lines, i)) continue;
 
-      // Guard check
-      let severity = rule.severity;
-      let guard = { mitigated: false, guardLine: null, guardCode: null };
+      const guard = (rule.guards && rule.guards.length > 0)
+        ? checkGuard(lines, i, rule.guards)
+        : null;
 
-      if (rule.guards && rule.guards.length > 0) {
-        guard = checkGuard(lines, i, rule.guards);
-        if (guard.mitigated) {
-          severity = downgradeSeverity(severity);
-        }
-      }
-
-      findings.push({
-        id: rule.id,
-        title: rule.title,
-        layer: rule.layer,
-        severity: severity,
-        owasp: rule.owasp,
-        nis2: rule.nis2,
-        gdpr: rule.gdpr || null,
-        dora: rule.dora || null,
-        file: relPath,
-        line: i + 1,
-        code: lines[i].trim().substring(0, 120),
-        mitigated: guard.mitigated,
-        guardLine: guard.guardLine,
-        guardCode: guard.guardCode,
-        description: rule.description,
-        recommendation: rule.recommendation,
-      });
+      findings.push(makeFinding(rule, relPath, i + 1, lines[i].trim().substring(0, 120), guard));
     }
   }
 
@@ -868,30 +845,11 @@ function scanFile(filePath, repoPath, allRules) {
 
 function runNegativeChecks(allContent, negativeRules) {
   const findings = [];
-
   for (const rule of negativeRules) {
     if (!rule.pattern.test(allContent)) {
-      findings.push({
-        id: rule.id,
-        title: rule.title,
-        layer: rule.layer,
-        severity: rule.severity,
-        owasp: rule.owasp,
-        nis2: rule.nis2,
-        gdpr: rule.gdpr || null,
-        dora: rule.dora || null,
-        file: '(entire codebase)',
-        line: null,
-        code: 'Pattern not found in any source file',
-        mitigated: false,
-        guardLine: null,
-        guardCode: null,
-        description: rule.description,
-        recommendation: rule.recommendation,
-      });
+      findings.push(makeFinding(rule, '(entire codebase)', null, 'Pattern not found in any source file'));
     }
   }
-
   return findings;
 }
 
@@ -899,22 +857,21 @@ function runNegativeChecks(allContent, negativeRules) {
 // Report: Markdown
 // ─────────────────────────────────────────────
 
+function summarizeFindings(findings) {
+  const summary = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+  const layers = {};
+  for (const f of findings) {
+    summary[f.severity] = (summary[f.severity] || 0) + 1;
+    layers[f.layer] = (layers[f.layer] || 0) + 1;
+  }
+  return { summary, layers };
+}
+
 function generateMarkdownReport(repoPath, findings, discovery, durationMs) {
   const repoName = path.basename(path.resolve(repoPath));
   const date = new Date().toISOString().split('T')[0];
   const filesScanned = discovery.totalSourceFiles;
-
-  // Summary counts
-  const summary = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
-  for (const f of findings) {
-    summary[f.severity] = (summary[f.severity] || 0) + 1;
-  }
-
-  // Layer counts
-  const layers = {};
-  for (const f of findings) {
-    layers[f.layer] = (layers[f.layer] || 0) + 1;
-  }
+  const { summary, layers } = summarizeFindings(findings);
 
   function layerEmoji(count) {
     if (count === 0 || count === undefined) return '\u2705';
@@ -953,10 +910,11 @@ function generateMarkdownReport(repoPath, findings, discovery, durationMs) {
   // Layer Assessment
   md += `## Layer Assessment\n\n`;
   md += `| Layer | Status | Findings | Description |\n|-------|--------|----------|-------------|\n`;
-  for (const l of ['L0', 'L1', 'L2', 'L3', 'L4']) {
+  for (const l of ['L0', 'L1']) {
     const count = layers[l] || 0;
     md += `| ${l} | ${layerEmoji(count)} | ${count} | ${layerDescriptions[l]} |\n`;
   }
+  md += `| L2-L4 | — | — | [Available in Compuute Professional Audit](https://compuute.se/audit) |\n`;
   md += '\n';
 
   // Detailed Findings (grouped by severity)
@@ -1045,16 +1003,7 @@ function generateMarkdownReport(repoPath, findings, discovery, durationMs) {
 
 function generateJsonReport(repoPath, findings, discovery, durationMs) {
   const repoName = path.basename(path.resolve(repoPath));
-
-  const summary = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
-  for (const f of findings) {
-    summary[f.severity] = (summary[f.severity] || 0) + 1;
-  }
-
-  const layers = {};
-  for (const f of findings) {
-    layers[f.layer] = (layers[f.layer] || 0) + 1;
-  }
+  const { summary, layers } = summarizeFindings(findings);
 
   return JSON.stringify({
     scanner: 'compuute-scan',
@@ -1181,18 +1130,17 @@ function main() {
   }
 
   // Build combined content for negative checks
-  let allContent = '';
-  const fileContents = {};
+  const contentParts = [];
   for (const f of sourceFiles) {
     const content = readFileSafe(f);
     if (content) {
-      fileContents[f] = content;
-      allContent += content + '\n';
+      contentParts.push(content);
       if (opts.verbose) {
         console.error(`  ${path.relative(repoPath, f)}`);
       }
     }
   }
+  const allContent = contentParts.join('\n');
 
   // Collect all per-file rules
   const allFileRules = [...L1_RULES, ...L2_RULES, ...L3_RULES, ...L4_RULES, ...L4_RULES_EXTRA];
