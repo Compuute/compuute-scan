@@ -14,6 +14,7 @@ const path = require('path');
 
 const VERSION = '0.3.0';
 const MAX_FILE_SIZE = 500 * 1024; // 500 KB
+const MAX_CODE_SNIPPET = 120; // max characters in code/guardCode snippets
 const GUARD_WINDOW = 15; // lines above/below to check for guards
 
 const SCAN_EXTENSIONS = new Set([
@@ -108,6 +109,7 @@ function walkDir(dir) {
   }
   for (const entry of entries) {
     if (SKIP_DIRS.has(entry.name)) continue;
+    if (entry.isSymbolicLink()) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       files.push(...walkDir(full));
@@ -154,7 +156,7 @@ function checkGuard(lines, matchLineIdx, guardPatterns) {
         return {
           mitigated: true,
           guardLine: i + 1,
-          guardCode: line.trim().substring(0, 120),
+          guardCode: line.trim().substring(0, MAX_CODE_SNIPPET),
         };
       }
     }
@@ -704,7 +706,9 @@ function runL0Discovery(repoPath, allContent, sourceFiles) {
       const deps = { ...pkg.dependencies, ...pkg.devDependencies };
       discovery.dependencies = Object.entries(deps).map(([name, ver]) => `${name}@${ver}`);
       discovery.dependencyFile = 'package.json';
-    } catch { /* skip */ }
+    } catch (err) {
+      console.error(`[warn] Failed to parse package.json: ${err.message}`);
+    }
   }
 
   const reqTxtPath = path.join(repoPath, 'requirements.txt');
@@ -713,7 +717,9 @@ function runL0Discovery(repoPath, allContent, sourceFiles) {
       const content = fs.readFileSync(reqTxtPath, 'utf-8');
       discovery.dependencies = content.split('\n').filter(l => l.trim() && !l.startsWith('#'));
       discovery.dependencyFile = 'requirements.txt';
-    } catch { /* skip */ }
+    } catch (err) {
+      console.error(`[warn] Failed to parse requirements.txt: ${err.message}`);
+    }
   }
 
   // Python pyproject.toml dependencies
@@ -722,7 +728,6 @@ function runL0Discovery(repoPath, allContent, sourceFiles) {
     try {
       const content = fs.readFileSync(pyprojectPath, 'utf-8');
       const deps = [];
-      // Simple extraction of dependencies from pyproject.toml
       const depMatches = content.match(/["']([a-zA-Z0-9_-]+(?:\[[\w,]+\])?(?:[><=!~]+[^"']+)?)["']/g);
       if (depMatches) {
         for (const m of depMatches) {
@@ -736,7 +741,9 @@ function runL0Discovery(repoPath, allContent, sourceFiles) {
         discovery.dependencies = deps;
         discovery.dependencyFile = 'pyproject.toml';
       }
-    } catch { /* skip */ }
+    } catch (err) {
+      console.error(`[warn] Failed to parse pyproject.toml: ${err.message}`);
+    }
   }
 
   // Python lock files for dependency pinning
@@ -761,7 +768,6 @@ function runL0Discovery(repoPath, allContent, sourceFiles) {
           if (m && !m[1].startsWith('//')) deps.push(`${m[1]}@${m[2]}`);
         }
       }
-      // Single-line require (not followed by opening paren)
       for (const m of content.matchAll(/require\s+(\S+)\s+(v\S+)/g)) {
         if (!deps.some(d => d.startsWith(m[1]))) deps.push(`${m[1]}@${m[2]}`);
       }
@@ -769,7 +775,9 @@ function runL0Discovery(repoPath, allContent, sourceFiles) {
         discovery.dependencies = deps;
         discovery.dependencyFile = 'go.mod';
       }
-    } catch { /* skip */ }
+    } catch (err) {
+      console.error(`[warn] Failed to parse go.mod: ${err.message}`);
+    }
   }
 
   return discovery;
@@ -809,6 +817,7 @@ function scanFile(filePath, repoPath, allRules) {
   const findings = [];
 
   for (const rule of allRules) {
+    // Count-based detection: fires when pattern exceeds N occurrences in a file
     if (rule.countThreshold) {
       let count = 0;
       for (let i = 0; i < lines.length; i++) {
@@ -836,7 +845,7 @@ function scanFile(filePath, repoPath, allRules) {
         ? checkGuard(lines, i, rule.guards)
         : null;
 
-      findings.push(makeFinding(rule, relPath, i + 1, lines[i].trim().substring(0, 120), guard));
+      findings.push(makeFinding(rule, relPath, i + 1, lines[i].trim().substring(0, MAX_CODE_SNIPPET), guard));
     }
   }
 
@@ -887,39 +896,6 @@ function generateMarkdownReport(repoPath, findings, discovery, durationMs) {
     L4: 'Monitoring & Logging',
   };
 
-  let md = '';
-
-  // Header
-  md += `# MCP Security Scan Report\n\n`;
-  md += `| Field | Value |\n|-------|-------|\n`;
-  md += `| **Repository** | \`${repoName}\` |\n`;
-  md += `| **Date** | ${date} |\n`;
-  md += `| **Files Scanned** | ${filesScanned} |\n`;
-  md += `| **Scan Duration** | ${(durationMs / 1000).toFixed(2)}s |\n`;
-  md += `| **Scanner** | compuute-scan v${VERSION} |\n\n`;
-
-  // Executive Summary
-  md += `## Executive Summary\n\n`;
-  md += `| Severity | Count |\n|----------|-------|\n`;
-  md += `| \uD83D\uDD34 Critical | ${summary.critical} |\n`;
-  md += `| \uD83D\uDFE0 High | ${summary.high} |\n`;
-  md += `| \uD83D\uDFE1 Medium | ${summary.medium} |\n`;
-  md += `| \uD83D\uDFE2 Low | ${summary.low} |\n`;
-  md += `| Total | ${findings.length} |\n\n`;
-
-  // Layer Assessment
-  md += `## Layer Assessment\n\n`;
-  md += `| Layer | Status | Findings | Description |\n|-------|--------|----------|-------------|\n`;
-  for (const l of ['L0', 'L1']) {
-    const count = layers[l] || 0;
-    md += `| ${l} | ${layerEmoji(count)} | ${count} | ${layerDescriptions[l]} |\n`;
-  }
-  md += `| L2-L4 | — | — | [Available in Compuute Professional Audit](https://compuute.se/audit) |\n`;
-  md += '\n';
-
-  // Detailed Findings (grouped by severity)
-  md += `## Detailed Findings\n\n`;
-
   const severityOrder = ['critical', 'high', 'medium', 'low', 'info'];
   const severityLabels = {
     critical: '\uD83D\uDD34 CRITICAL',
@@ -929,72 +905,104 @@ function generateMarkdownReport(repoPath, findings, discovery, durationMs) {
     info: '\u2139\uFE0F INFO',
   };
 
+  const p = [];
+
+  // Header
+  p.push(`# MCP Security Scan Report\n`);
+  p.push(`| Field | Value |\n|-------|-------|`);
+  p.push(`| **Repository** | \`${repoName}\` |`);
+  p.push(`| **Date** | ${date} |`);
+  p.push(`| **Files Scanned** | ${filesScanned} |`);
+  p.push(`| **Scan Duration** | ${(durationMs / 1000).toFixed(2)}s |`);
+  p.push(`| **Scanner** | compuute-scan v${VERSION} |\n`);
+
+  // Executive Summary
+  p.push(`## Executive Summary\n`);
+  p.push(`| Severity | Count |\n|----------|-------|`);
+  p.push(`| \uD83D\uDD34 Critical | ${summary.critical} |`);
+  p.push(`| \uD83D\uDFE0 High | ${summary.high} |`);
+  p.push(`| \uD83D\uDFE1 Medium | ${summary.medium} |`);
+  p.push(`| \uD83D\uDFE2 Low | ${summary.low} |`);
+  p.push(`| Total | ${findings.length} |\n`);
+
+  // Layer Assessment
+  p.push(`## Layer Assessment\n`);
+  p.push(`| Layer | Status | Findings | Description |\n|-------|--------|----------|-------------|`);
+  for (const l of ['L0', 'L1']) {
+    const count = layers[l] || 0;
+    p.push(`| ${l} | ${layerEmoji(count)} | ${count} | ${layerDescriptions[l]} |`);
+  }
+  p.push(`| L2-L4 | — | — | [Available in Compuute Professional Audit](https://compuute.se/audit) |\n`);
+
+  // Detailed Findings (grouped by severity)
+  p.push(`## Detailed Findings\n`);
+
   for (const sev of severityOrder) {
     const sevFindings = findings.filter(f => f.severity === sev);
     if (sevFindings.length === 0) continue;
 
-    md += `### ${severityLabels[sev]}\n\n`;
+    p.push(`### ${severityLabels[sev]}\n`);
 
     for (const f of sevFindings) {
-      md += `#### ${f.id}: ${f.title}\n\n`;
-      md += `| Field | Value |\n|-------|-------|\n`;
-      md += `| **Severity** | ${sev.toUpperCase()}${f.mitigated ? ' (Mitigated)' : ''} |\n`;
-      md += `| **Layer** | ${f.layer} |\n`;
-      md += `| **OWASP** | ${f.owasp} |\n`;
-      md += `| **NIS2** | ${f.nis2} |\n`;
-      if (f.gdpr) md += `| **GDPR** | ${f.gdpr} |\n`;
-      if (f.dora) md += `| **DORA** | ${f.dora} |\n`;
-      if (f.file) md += `| **File** | \`${f.file}\` |\n`;
-      if (f.line) md += `| **Line** | ${f.line} |\n`;
-      md += '\n';
+      p.push(`#### ${f.id}: ${f.title}\n`);
+      p.push(`| Field | Value |\n|-------|-------|`);
+      p.push(`| **Severity** | ${sev.toUpperCase()}${f.mitigated ? ' (Mitigated)' : ''} |`);
+      p.push(`| **Layer** | ${f.layer} |`);
+      p.push(`| **OWASP** | ${f.owasp} |`);
+      p.push(`| **NIS2** | ${f.nis2} |`);
+      if (f.gdpr) p.push(`| **GDPR** | ${f.gdpr} |`);
+      if (f.dora) p.push(`| **DORA** | ${f.dora} |`);
+      if (f.file) p.push(`| **File** | \`${f.file}\` |`);
+      if (f.line) p.push(`| **Line** | ${f.line} |`);
+      p.push('');
 
       if (f.code) {
-        md += `**Code:**\n\`\`\`\n${f.code}\n\`\`\`\n\n`;
+        p.push(`**Code:**\n\`\`\`\n${f.code}\n\`\`\`\n`);
       }
 
       if (f.mitigated) {
-        md += `> \u2705 **Mitigated** — Guard detected at line ${f.guardLine}: \`${f.guardCode}\`\n\n`;
+        p.push(`> \u2705 **Mitigated** — Guard detected at line ${f.guardLine}: \`${f.guardCode}\`\n`);
       }
 
-      md += `**Description:** ${f.description}\n\n`;
-      md += `**Recommendation:** ${f.recommendation}\n\n`;
-      md += `---\n\n`;
+      p.push(`**Description:** ${f.description}\n`);
+      p.push(`**Recommendation:** ${f.recommendation}\n`);
+      p.push(`---\n`);
     }
   }
 
   // L0 Discovery
-  md += `## L0: Discovery\n\n`;
-  md += `| Property | Value |\n|----------|-------|\n`;
-  md += `| **Transport** | ${discovery.transports.length ? discovery.transports.join(', ') : 'Not detected'} |\n`;
-  md += `| **MCP Tools** | ~${discovery.toolCount} detected |\n`;
-  md += `| **Dependency Pinning** | ${discovery.hasDependencyPinning ? '\u2705 Yes' : '\u274C No'} |\n`;
-  md += `| **Containerization** | ${discovery.hasContainerization ? '\u2705 Yes' : '\u274C No'} |\n`;
+  p.push(`## L0: Discovery\n`);
+  p.push(`| Property | Value |\n|----------|-------|`);
+  p.push(`| **Transport** | ${discovery.transports.length ? discovery.transports.join(', ') : 'Not detected'} |`);
+  p.push(`| **MCP Tools** | ~${discovery.toolCount} detected |`);
+  p.push(`| **Dependency Pinning** | ${discovery.hasDependencyPinning ? '\u2705 Yes' : '\u274C No'} |`);
+  p.push(`| **Containerization** | ${discovery.hasContainerization ? '\u2705 Yes' : '\u274C No'} |`);
   if (discovery.dependencies.length > 0) {
-    md += `| **Dependencies** | ${discovery.dependencies.length} (${discovery.dependencyFile}) |\n`;
+    p.push(`| **Dependencies** | ${discovery.dependencies.length} (${discovery.dependencyFile}) |`);
   }
-  md += '\n';
+  p.push('');
 
   if (discovery.dependencies.length > 0) {
-    md += `<details>\n<summary>Dependency List</summary>\n\n`;
+    p.push(`<details>\n<summary>Dependency List</summary>\n`);
     for (const dep of discovery.dependencies) {
-      md += `- ${dep}\n`;
+      p.push(`- ${dep}`);
     }
-    md += `\n</details>\n\n`;
+    p.push(`\n</details>\n`);
   }
 
   // Footer
-  md += `---\n\n`;
-  md += `## Full Security Assessment\n\n`;
-  md += `This scan covers **L0 Discovery + L1 Sandboxing** (${findings.length} findings).\n\n`;
-  md += `Production MCP deployments need deeper analysis:\n\n`;
-  md += `- **L2 Authorization** — RBAC, secret management, JWT/OAuth, PII/GDPR compliance\n`;
-  md += `- **L3 Tool Integrity** — SSRF, injection, prompt poisoning, supply chain\n`;
-  md += `- **L4 Runtime Monitoring** — audit logging, rate limiting, error leakage\n\n`;
-  md += `**49 rules. OWASP LLM Top 10 (10/10). NIS2 Art. 21 (7/7). DORA. GDPR (6/6).**\n\n`;
-  md += `> [Book a Compuute Security Assessment](https://compuute.se/audit)\n\n`;
-  md += `*Generated by compuute-scan v${VERSION} (open source) | Compuute AB*\n`;
+  p.push(`---\n`);
+  p.push(`## Full Security Assessment\n`);
+  p.push(`This scan covers **L0 Discovery + L1 Sandboxing** (${findings.length} findings).\n`);
+  p.push(`Production MCP deployments need deeper analysis:\n`);
+  p.push(`- **L2 Authorization** — RBAC, secret management, JWT/OAuth, PII/GDPR compliance`);
+  p.push(`- **L3 Tool Integrity** — SSRF, injection, prompt poisoning, supply chain`);
+  p.push(`- **L4 Runtime Monitoring** — audit logging, rate limiting, error leakage\n`);
+  p.push(`**49 rules. OWASP LLM Top 10 (10/10). NIS2 Art. 21 (7/7). DORA. GDPR (6/6).**\n`);
+  p.push(`> [Book a Compuute Security Assessment](https://compuute.se/audit)\n`);
+  p.push(`*Generated by compuute-scan v${VERSION} (open source) | Compuute AB*`);
 
-  return md;
+  return p.join('\n');
 }
 
 // ─────────────────────────────────────────────

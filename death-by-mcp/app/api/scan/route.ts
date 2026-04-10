@@ -5,8 +5,9 @@ import { checkRateLimit } from '@/lib/rate-limit';
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
-  // Rate limit by IP
+  // Rate limit by IP — prefer req.ip (set by Vercel/platform from real connection)
   const ip =
+    req.ip ??
     req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
     req.headers.get('x-real-ip') ??
     'unknown';
@@ -31,8 +32,8 @@ export async function POST(req: NextRequest) {
   }
 
   const { repoUrl } = body;
-  if (!repoUrl || typeof repoUrl !== 'string') {
-    return NextResponse.json({ error: 'Missing repoUrl field.' }, { status: 400 });
+  if (!repoUrl || typeof repoUrl !== 'string' || repoUrl.length > 200) {
+    return NextResponse.json({ error: 'Missing or invalid repoUrl field.' }, { status: 400 });
   }
 
   // Validate URL

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 export default function ScanForm() {
@@ -10,6 +10,10 @@ export default function ScanForm() {
   const [error, setError] = useState('');
   const [logs, setLogs] = useState<string[]>([]);
   const router = useRouter();
+  const logTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  // Clear all pending timers on unmount
+  useEffect(() => () => logTimersRef.current.forEach(clearTimeout), []);
 
   async function handleScan(e: React.FormEvent) {
     e.preventDefault();
@@ -34,14 +38,14 @@ export default function ScanForm() {
     const repoName = trimmed.split('/').pop() || 'repo';
     setLogs(['$ compuute-scan ' + repoName]);
 
-    const logTimers: ReturnType<typeof setTimeout>[] = [];
+    logTimersRef.current = [];
     const addLog = (msg: string, delay: number) =>
       new Promise<void>((resolve) => {
         const t = setTimeout(() => {
           setLogs((prev) => [...prev, msg]);
           resolve();
         }, delay);
-        logTimers.push(t);
+        logTimersRef.current.push(t);
       });
 
     try {
@@ -62,7 +66,7 @@ export default function ScanForm() {
       if (!res.ok) {
         setError(data.error || 'Scan failed.');
         setScanning(false);
-        logTimers.forEach(clearTimeout);
+        logTimersRef.current.forEach(clearTimeout);
         return;
       }
 
