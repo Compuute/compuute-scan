@@ -178,8 +178,94 @@ function runL0Discovery(repoPath, allContent, sourceFiles) {
     }
   }
 
+  // C#/.NET .csproj dependencies
+  const csprojFiles = sourceFiles.filter(f => f.endsWith('.cs'));
+  if (csprojFiles.length > 0 && !discovery.dependencyFile) {
+    // Look for *.csproj in repo root or one level deep
+    const csprojCandidates = [];
+    try {
+      for (const entry of fs.readdirSync(repoPath, { withFileTypes: true })) {
+        if (entry.isFile() && entry.name.endsWith('.csproj')) {
+          csprojCandidates.push(path.join(repoPath, entry.name));
+        } else if (entry.isDirectory() && !SKIP_DIRS.has(entry.name)) {
+          try {
+            for (const sub of fs.readdirSync(path.join(repoPath, entry.name), { withFileTypes: true })) {
+              if (sub.isFile() && sub.name.endsWith('.csproj')) {
+                csprojCandidates.push(path.join(repoPath, entry.name, sub.name));
+              }
+            }
+          } catch { /* skip unreadable */ }
+        }
+      }
+    } catch { /* skip */ }
+    if (csprojCandidates.length > 0) {
+      try {
+        const content = fs.readFileSync(csprojCandidates[0], 'utf-8');
+        const deps = [];
+        const pkgRefs = content.matchAll(/<PackageReference\s+Include="([^"]+)"\s+Version="([^"]+)"/g);
+        for (const m of pkgRefs) {
+          deps.push(`${m[1]}@${m[2]}`);
+        }
+        if (deps.length > 0) {
+          discovery.dependencies = deps;
+          discovery.dependencyFile = path.basename(csprojCandidates[0]);
+        }
+      } catch (err) {
+        console.error(`[warn] Failed to parse .csproj: ${err.message}`);
+      }
+    }
+  }
+
+  // Java pom.xml dependencies
+  const pomPath = path.join(repoPath, 'pom.xml');
+  if (fs.existsSync(pomPath) && !discovery.dependencyFile) {
+    try {
+      const content = fs.readFileSync(pomPath, 'utf-8');
+      const deps = [];
+      // Simple XML extraction for <dependency> blocks
+      const depBlocks = content.matchAll(/<dependency>\s*([\s\S]*?)<\/dependency>/g);
+      for (const block of depBlocks) {
+        const groupId = block[1].match(/<groupId>([^<]+)<\/groupId>/);
+        const artifactId = block[1].match(/<artifactId>([^<]+)<\/artifactId>/);
+        const version = block[1].match(/<version>([^<]+)<\/version>/);
+        if (groupId && artifactId) {
+          const ver = version ? `@${version[1]}` : '';
+          deps.push(`${groupId[1]}:${artifactId[1]}${ver}`);
+        }
+      }
+      if (deps.length > 0) {
+        discovery.dependencies = deps;
+        discovery.dependencyFile = 'pom.xml';
+      }
+    } catch (err) {
+      console.error(`[warn] Failed to parse pom.xml: ${err.message}`);
+    }
+  }
+
+  // Kotlin/Gradle build.gradle dependencies
+  const gradlePath = path.join(repoPath, 'build.gradle');
+  const gradleKtsPath = path.join(repoPath, 'build.gradle.kts');
+  const actualGradle = fs.existsSync(gradleKtsPath) ? gradleKtsPath : (fs.existsSync(gradlePath) ? gradlePath : null);
+  if (actualGradle && !discovery.dependencyFile) {
+    try {
+      const content = fs.readFileSync(actualGradle, 'utf-8');
+      const deps = [];
+      // implementation "group:artifact:version" or implementation("group:artifact:version")
+      const depPattern = /(?:implementation|api|compileOnly|runtimeOnly|testImplementation)\s*[\("]\s*['"]([^'"]+)['"]/g;
+      let m;
+      while ((m = depPattern.exec(content)) !== null) {
+        deps.push(m[1]);
+      }
+      if (deps.length > 0) {
+        discovery.dependencies = deps;
+        discovery.dependencyFile = path.basename(actualGradle);
+      }
+    } catch (err) {
+      console.error(`[warn] Failed to parse ${path.basename(actualGradle)}: ${err.message}`);
+    }
+  }
+
   return discovery;
 }
-
 
 

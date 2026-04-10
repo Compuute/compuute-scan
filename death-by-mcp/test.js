@@ -792,6 +792,231 @@ function testL1_026(line) {
 assert('L1-026: danger_accept_invalid_certs(true) triggers', testL1_026('.danger_accept_invalid_certs(true)'));
 assert('L1-026: danger_accept_invalid_certs(false) safe', !testL1_026('.danger_accept_invalid_certs(false)'));
 
+// L1-028: C# Process.Start
+function testL1_028(line) {
+  if (/^\s*\/\//.test(line)) return false;
+  if (/Process\.Start\s*\(/.test(line)) return true;
+  if (/FileName\s*=\s*[^"']/.test(line) && /ProcessStartInfo/.test(line)) return true;
+  return false;
+}
+assert('L1-028: Process.Start(cmd) triggers', testL1_028('Process.Start(userInput)'));
+assert('L1-028: ProcessStartInfo FileName triggers', testL1_028('var psi = new ProcessStartInfo { FileName = cmd }'));
+assert('L1-028: // Process.Start in comment safe', !testL1_028('// Process.Start(cmd)'));
+
+// L1-029: C# SqlCommand string concat
+function testL1_029(line) {
+  if (/^\s*\/\//.test(line)) return false;
+  if (/SqlCommand\s*\(\s*\$"/.test(line)) return true;
+  if (/SqlCommand\s*\(\s*".*\+/.test(line)) return true;
+  if (/CommandText\s*=\s*\$"/.test(line) && /SELECT|INSERT|UPDATE|DELETE|WHERE/i.test(line)) return true;
+  if (/CommandText\s*=\s*".*\+/.test(line) && /SELECT|INSERT|UPDATE|DELETE|WHERE/i.test(line)) return true;
+  return false;
+}
+assert('L1-029: SqlCommand($"SELECT...") triggers', testL1_029('var cmd = new SqlCommand($"SELECT * FROM users WHERE id = {id}", conn)'));
+assert('L1-029: SqlCommand("..." + var) triggers', testL1_029('var cmd = new SqlCommand("SELECT * FROM users WHERE id=" + id, conn)'));
+assert('L1-029: SqlCommand(@"SELECT...@id") safe', !testL1_029('var cmd = new SqlCommand("SELECT * FROM users WHERE id = @id", conn)'));
+
+// L1-030: C# [AllowAnonymous]
+function testL1_030(line) {
+  if (/^\s*\/\//.test(line)) return false;
+  return /\[AllowAnonymous\]/.test(line);
+}
+assert('L1-030: [AllowAnonymous] triggers', testL1_030('[AllowAnonymous]'));
+assert('L1-030: [Authorize] safe', !testL1_030('[Authorize]'));
+assert('L1-030: // [AllowAnonymous] in comment safe', !testL1_030('// [AllowAnonymous]'));
+
+// L1-031: C# BinaryFormatter
+function testL1_031(line) {
+  if (/^\s*\/\//.test(line)) return false;
+  return /\b(BinaryFormatter|SoapFormatter|ObjectStateFormatter|LosFormatter|NetDataContractSerializer)\b/.test(line);
+}
+assert('L1-031: BinaryFormatter triggers', testL1_031('var bf = new BinaryFormatter()'));
+assert('L1-031: SoapFormatter triggers', testL1_031('var sf = new SoapFormatter()'));
+assert('L1-031: JsonSerializer safe', !testL1_031('var json = JsonSerializer.Serialize(obj)'));
+assert('L1-031: // BinaryFormatter in comment safe', !testL1_031('// BinaryFormatter is banned'));
+
+// L1-032: C# CORS AllowAnyOrigin
+function testL1_032(line) {
+  if (/^\s*\/\//.test(line)) return false;
+  return /\.AllowAnyOrigin\s*\(/.test(line);
+}
+assert('L1-032: .AllowAnyOrigin() triggers', testL1_032('builder.AllowAnyOrigin()'));
+assert('L1-032: .WithOrigins() safe', !testL1_032('builder.WithOrigins("https://app.com")'));
+
+// L1-033: Java Runtime.exec()
+function testL1_033(line) {
+  if (/^\s*\/\//.test(line)) return false;
+  if (/Runtime\.getRuntime\s*\(\s*\)\.exec\s*\(/.test(line)) return true;
+  if (/ProcessBuilder\s*\(/.test(line) && /\+/.test(line)) return true;
+  return false;
+}
+assert('L1-033: Runtime.exec(cmd) triggers', testL1_033('Runtime.getRuntime().exec(cmd)'));
+assert('L1-033: ProcessBuilder with concat triggers', testL1_033('new ProcessBuilder("sh", "-c", prefix + userInput)'));
+assert('L1-033: // Runtime.exec in comment safe', !testL1_033('// Runtime.getRuntime().exec(cmd)'));
+
+// L1-034: Java JDBC SQL concat
+function testL1_034(line) {
+  if (/^\s*\/\//.test(line)) return false;
+  if (/\.(executeQuery|executeUpdate|execute)\s*\(\s*".*\+/.test(line)) return true;
+  if (/\.(executeQuery|executeUpdate|execute)\s*\(\s*[a-zA-Z]/.test(line) && !/PreparedStatement/.test(line)) return true;
+  if (/\.(executeQuery|executeUpdate|execute)\s*\(\s*".*\$\{/.test(line)) return true;
+  return false;
+}
+assert('L1-034: executeQuery("..."+var) triggers', testL1_034('stmt.executeQuery("SELECT * FROM users WHERE id=" + id)'));
+assert('L1-034: execute(sqlVar) triggers', testL1_034('stmt.execute(query)'));
+assert('L1-034: PreparedStatement safe', !testL1_034('PreparedStatement ps = conn.prepareStatement("SELECT * FROM users WHERE id = ?")'));
+
+// L1-035: Java ObjectInputStream
+function testL1_035(line) {
+  if (/^\s*\/\//.test(line)) return false;
+  if (/new\s+ObjectInputStream\s*\(/.test(line)) return true;
+  if (/\.readObject\s*\(/.test(line) && !/JsonReader|XmlReader|DataReader/.test(line)) return true;
+  return false;
+}
+assert('L1-035: new ObjectInputStream triggers', testL1_035('ObjectInputStream ois = new ObjectInputStream(fis)'));
+assert('L1-035: readObject() triggers', testL1_035('Object obj = ois.readObject()'));
+assert('L1-035: JsonReader safe', !testL1_035('JsonReader reader = new JsonReader(input)'));
+
+// L1-036: Spring permitAll
+function testL1_036(line) {
+  if (/^\s*\/\//.test(line)) return false;
+  return /\.permitAll\s*\(/.test(line);
+}
+assert('L1-036: .permitAll() triggers', testL1_036('.antMatchers("/api/**").permitAll()'));
+assert('L1-036: .authenticated() safe', !testL1_036('.antMatchers("/api/**").authenticated()'));
+assert('L1-036: // .permitAll() in comment safe', !testL1_036('// .permitAll()'));
+
+// L1-037: Java @CrossOrigin
+function testL1_037(line) {
+  if (/^\s*\/\//.test(line)) return false;
+  if (/@CrossOrigin\s*$/.test(line.trim())) return true;
+  if (/@CrossOrigin\s*\(\s*\)/.test(line)) return true;
+  if (/@CrossOrigin\s*\(.*origins\s*=\s*"\*"/.test(line)) return true;
+  return false;
+}
+assert('L1-037: @CrossOrigin bare triggers', testL1_037('@CrossOrigin'));
+assert('L1-037: @CrossOrigin() empty triggers', testL1_037('@CrossOrigin()'));
+assert('L1-037: @CrossOrigin(origins="*") triggers', testL1_037('@CrossOrigin(origins = "*")'));
+assert('L1-037: @CrossOrigin(origins="https://...") safe', !testL1_037('@CrossOrigin(origins = "https://app.com")'));
+
+// ─────────────────────────────────────────────
+// Version Parsing & CVE Matching
+// ─────────────────────────────────────────────
+
+console.log('\n=== Dependency Checks ===');
+
+// Version parsing helper (mirrors src/dependency-checks.js)
+function _parseVersion(verStr) {
+  if (!verStr) return null;
+  const cleaned = verStr.replace(/^[\^~>=<v]+/, '').trim();
+  const parts = cleaned.split('.').map(p => {
+    const n = parseInt(p, 10);
+    return isNaN(n) ? 0 : n;
+  });
+  if (parts.length === 0) return null;
+  while (parts.length < 3) parts.push(0);
+  return parts;
+}
+
+function _isVersionBelow(actualVer, thresholdVer) {
+  const actual = _parseVersion(actualVer);
+  const threshold = _parseVersion(thresholdVer);
+  if (!actual || !threshold) return false;
+  const len = Math.max(actual.length, threshold.length);
+  for (let i = 0; i < len; i++) {
+    const a = actual[i] || 0;
+    const t = threshold[i] || 0;
+    if (a < t) return true;
+    if (a > t) return false;
+  }
+  return false;
+}
+
+// Test version parsing
+assert('Version: 4.17.15 < 4.17.21', _isVersionBelow('4.17.15', '4.17.21'));
+assert('Version: 4.17.21 not < 4.17.21', !_isVersionBelow('4.17.21', '4.17.21'));
+assert('Version: 4.17.22 not < 4.17.21', !_isVersionBelow('4.17.22', '4.17.21'));
+assert('Version: ^1.5.0 < 1.6.0', _isVersionBelow('^1.5.0', '1.6.0'));
+assert('Version: ~2.28.0 < 2.32.0', _isVersionBelow('~2.28.0', '2.32.0'));
+assert('Version: v0.10.0 < v0.17.0', _isVersionBelow('v0.10.0', 'v0.17.0'));
+assert('Version: v0.23.0 not < v0.23.0', !_isVersionBelow('v0.23.0', 'v0.23.0'));
+assert('Version: 1.0.0 < 2.0.0', _isVersionBelow('1.0.0', '2.0.0'));
+
+// Test CVE matching via self-scan output (the scanner's own deps are checked)
+// We verify the scanner finds CVEs when scanning a project with vulnerable deps
+// by running it against a temp directory with a crafted package.json
+const { execFileSync: execDepCheck } = require('child_process');
+const fsCve = require('fs');
+const path = require('path');
+const tmpCveDir = '/tmp/compuute-cve-test-' + Date.now();
+fsCve.mkdirSync(tmpCveDir, { recursive: true });
+fsCve.writeFileSync(path.join(tmpCveDir, 'package.json'), JSON.stringify({
+  name: 'test-cve-project',
+  dependencies: { 'lodash': '^4.17.15', 'axios': '^1.5.0' },
+}));
+fsCve.writeFileSync(path.join(tmpCveDir, 'index.js'), '// empty');
+
+const cveOutputPath = '/tmp/compuute-cve-test-output.json';
+try {
+  execDepCheck('node', ['compuute-scan.js', tmpCveDir, '--json', '--output', cveOutputPath], {
+    stdio: 'pipe', timeout: 30000,
+  });
+} catch { /* may exit non-zero */ }
+let cveResult = null;
+try {
+  cveResult = JSON.parse(fsCve.readFileSync(cveOutputPath, 'utf-8'));
+} catch { cveResult = null; }
+
+assert('CVE: scan produces output for test project', cveResult !== null);
+const cveFindings = cveResult ? cveResult.findings.filter(f => f.id === 'L0-CVE') : [];
+assert('CVE: lodash@4.17.15 detected', cveFindings.some(f => f.code && f.code.includes('lodash')));
+assert('CVE: axios@1.5.0 detected', cveFindings.some(f => f.code && f.code.includes('axios')));
+
+// Test with safe versions
+fsCve.writeFileSync(path.join(tmpCveDir, 'package.json'), JSON.stringify({
+  name: 'test-safe-project',
+  dependencies: { 'lodash': '^4.17.21', 'axios': '^1.7.4' },
+}));
+try {
+  execDepCheck('node', ['compuute-scan.js', tmpCveDir, '--json', '--output', cveOutputPath], {
+    stdio: 'pipe', timeout: 30000,
+  });
+} catch { /* may exit non-zero */ }
+let safeResult = null;
+try {
+  safeResult = JSON.parse(fsCve.readFileSync(cveOutputPath, 'utf-8'));
+} catch { safeResult = null; }
+
+const safeCveFindings = safeResult ? safeResult.findings.filter(f => f.id === 'L0-CVE') : [];
+assert('CVE: safe versions have no CVE findings', safeCveFindings.length === 0);
+
+// Test dependency age via same mechanism
+fsCve.writeFileSync(path.join(tmpCveDir, 'package.json'), JSON.stringify({
+  name: 'test-age-project',
+  dependencies: { 'react': '^16.0.0' },
+}));
+try {
+  execDepCheck('node', ['compuute-scan.js', tmpCveDir, '--json', '--output', cveOutputPath], {
+    stdio: 'pipe', timeout: 30000,
+  });
+} catch { /* may exit non-zero */ }
+let ageResult = null;
+try {
+  ageResult = JSON.parse(fsCve.readFileSync(cveOutputPath, 'utf-8'));
+} catch { ageResult = null; }
+
+const ageFindings = ageResult ? ageResult.findings.filter(f => f.id === 'L0-AGE') : [];
+assert('Age: react@16 flagged as outdated', ageFindings.some(f => f.code && f.code.includes('react')));
+
+// Cleanup
+try { fsCve.rmSync(tmpCveDir, { recursive: true }); } catch {}
+try { fsCve.unlinkSync(cveOutputPath); } catch {}
+
+// Version edge cases
+assert('Version: null returns false', !_isVersionBelow(null, '1.0.0'));
+assert('Version: empty string returns false', !_isVersionBelow('', '1.0.0'));
+assert('Version: 0.1.0 < 0.2.0', _isVersionBelow('0.1.0', '0.2.0'));
+
 // ─────────────────────────────────────────────
 // Self-scan: scanner must not trigger critical on itself
 // ─────────────────────────────────────────────
@@ -819,7 +1044,7 @@ try {
 assert('Self-scan: produces valid JSON', selfScanJson !== null);
 assert('Self-scan: has findings array', selfScanJson && Array.isArray(selfScanJson.findings));
 assert('Self-scan: has discovery data', selfScanJson && selfScanJson.l0Discovery !== undefined);
-assert('Self-scan: has version', selfScanJson && selfScanJson.version === '0.5.0');
+assert('Self-scan: has version', selfScanJson && selfScanJson.version === '0.6.0');
 
 // ─────────────────────────────────────────────
 // Summary

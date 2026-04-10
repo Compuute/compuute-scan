@@ -498,6 +498,191 @@ const L1_RULES = [
     },
     guards: [/development/i, /testing/i, /cfg!\s*\(\s*debug_assertions/, /cfg!\s*\(\s*test/],
   },
+
+  // ─── C#/.NET Rules ───
+
+  {
+    id: 'L1-028',
+    title: 'C# Process.Start with user input',
+    layer: 'L1',
+    severity: 'critical',
+    owasp: 'A03:2021 Injection',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'Process.Start() executes external programs. If the arguments include user-controlled input, an attacker can execute arbitrary commands.',
+    recommendation: 'Avoid passing user input to Process.Start(). Use an allowlist of permitted commands and validate arguments. Never use shell execution (UseShellExecute = true) with user input.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      // Process.Start with variable (not just literal)
+      if (/Process\.Start\s*\(/.test(line)) return true;
+      // ProcessStartInfo with FileName from variable
+      if (/FileName\s*=\s*[^"']/.test(line) && /ProcessStartInfo/.test(line)) return true;
+      return false;
+    },
+    guards: [/allowlist/i, /whitelist/i, /UseShellExecute\s*=\s*false/, /ValidateCommand/i],
+  },
+  {
+    id: 'L1-029',
+    title: 'C# SQL string concatenation (SqlCommand)',
+    layer: 'L1',
+    severity: 'critical',
+    owasp: 'A03:2021 Injection',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'Building SQL queries with string concatenation or interpolation in SqlCommand enables SQL injection.',
+    recommendation: 'Use parameterized queries: new SqlCommand("SELECT * FROM t WHERE id = @id", conn) with cmd.Parameters.AddWithValue("@id", id).',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      // new SqlCommand("..." + var) or SqlCommand($"...")
+      if (/SqlCommand\s*\(\s*\$"/.test(line)) return true;
+      if (/SqlCommand\s*\(\s*".*\+/.test(line)) return true;
+      // CommandText = $"..." or "..." +
+      if (/CommandText\s*=\s*\$"/.test(line) && /SELECT|INSERT|UPDATE|DELETE|WHERE/i.test(line)) return true;
+      if (/CommandText\s*=\s*".*\+/.test(line) && /SELECT|INSERT|UPDATE|DELETE|WHERE/i.test(line)) return true;
+      return false;
+    },
+    guards: [/Parameters\.Add/, /SqlParameter/, /parameterized/i, /@\w+/],
+  },
+  {
+    id: 'L1-030',
+    title: 'C# [AllowAnonymous] on sensitive endpoint',
+    layer: 'L1',
+    severity: 'high',
+    owasp: 'A01:2021 Broken Access Control',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: '[AllowAnonymous] bypasses authentication on the decorated endpoint. If applied to sensitive endpoints, unauthenticated users can access protected resources.',
+    recommendation: 'Review all [AllowAnonymous] usages. Only apply to truly public endpoints (login, health check). Prefer [Authorize] as the default and explicitly mark exceptions.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      return /\[AllowAnonymous\]/.test(line);
+    },
+    guards: [/\[Authorize\]/, /\[Authorize\(/, /RequireAuthorization/, /IsAuthenticated/],
+  },
+  {
+    id: 'L1-031',
+    title: 'C# deserialization of untrusted data',
+    layer: 'L1',
+    severity: 'critical',
+    owasp: 'A08:2021 Software and Data Integrity Failures',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'BinaryFormatter, SoapFormatter, and ObjectStateFormatter deserialize arbitrary .NET types and can execute code during deserialization. These are banned by Microsoft.',
+    recommendation: 'Use System.Text.Json or JsonSerializer instead. Never use BinaryFormatter — it is obsolete and dangerous. If binary serialization is required, use MessagePack or protobuf.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      return /\b(BinaryFormatter|SoapFormatter|ObjectStateFormatter|LosFormatter|NetDataContractSerializer)\b/.test(line);
+    },
+    guards: [/System\.Text\.Json/, /JsonSerializer/, /JsonConvert/],
+  },
+  {
+    id: 'L1-032',
+    title: 'C# CORS AllowAnyOrigin',
+    layer: 'L1',
+    severity: 'high',
+    owasp: 'A05:2021 Security Misconfiguration',
+    nis2: 'Art. 21(2)(d) — Network security',
+    description: 'AllowAnyOrigin() in ASP.NET Core CORS policy allows any website to make cross-origin requests.',
+    recommendation: 'Use WithOrigins("https://specific-domain.com") instead of AllowAnyOrigin(). Never combine AllowAnyOrigin with AllowCredentials.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      return /\.AllowAnyOrigin\s*\(/.test(line);
+    },
+    guards: [/\.WithOrigins\s*\(/, /AllowedOrigins/i],
+  },
+
+  // ─── Java/Kotlin Rules ───
+
+  {
+    id: 'L1-033',
+    title: 'Java Runtime.exec() command execution',
+    layer: 'L1',
+    severity: 'critical',
+    owasp: 'A03:2021 Injection',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'Runtime.getRuntime().exec() executes system commands. If user input is concatenated into the command string, it enables command injection.',
+    recommendation: 'Use ProcessBuilder with explicit argument lists instead. Never concatenate user input into command strings. Validate input against an allowlist.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      // Runtime.getRuntime().exec(
+      if (/Runtime\.getRuntime\s*\(\s*\)\.exec\s*\(/.test(line)) return true;
+      // ProcessBuilder with string concat or shell
+      if (/ProcessBuilder\s*\(/.test(line) && /\+/.test(line)) return true;
+      // Kotlin: Runtime.getRuntime().exec
+      if (/runtime\s*\(\s*\)\.exec\s*\(/i.test(line)) return true;
+      return false;
+    },
+    guards: [/ProcessBuilder/, /allowlist/i, /whitelist/i, /validateCommand/i],
+  },
+  {
+    id: 'L1-034',
+    title: 'Java/Kotlin SQL string concatenation (JDBC)',
+    layer: 'L1',
+    severity: 'critical',
+    owasp: 'A03:2021 Injection',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'Building SQL queries with string concatenation in JDBC Statement enables SQL injection.',
+    recommendation: 'Use PreparedStatement with parameterized queries: conn.prepareStatement("SELECT * FROM t WHERE id = ?") and ps.setString(1, id).',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      // executeQuery("..." + var) or executeUpdate("..." + var)
+      if (/\.(executeQuery|executeUpdate|execute)\s*\(\s*".*\+/.test(line)) return true;
+      // Statement.execute with string concat
+      if (/\.(executeQuery|executeUpdate|execute)\s*\(\s*[a-zA-Z]/.test(line) && !/PreparedStatement/.test(line)) return true;
+      // Kotlin string template in SQL
+      if (/\.(executeQuery|executeUpdate|execute)\s*\(\s*".*\$\{/.test(line)) return true;
+      return false;
+    },
+    guards: [/PreparedStatement/, /prepareStatement/, /setString/, /setInt/, /NamedParameterJdbc/i, /JpaRepository/i],
+  },
+  {
+    id: 'L1-035',
+    title: 'Java ObjectInputStream deserialization',
+    layer: 'L1',
+    severity: 'critical',
+    owasp: 'A08:2021 Software and Data Integrity Failures',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'ObjectInputStream.readObject() deserializes arbitrary Java objects and can execute code via gadget chains. This is the root cause of most Java deserialization CVEs.',
+    recommendation: 'Avoid Java native serialization. Use JSON (Jackson/Gson) or protobuf. If unavoidable, use an ObjectInputFilter (JEP 290) to restrict allowed classes.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      // ObjectInputStream or readObject()
+      if (/new\s+ObjectInputStream\s*\(/.test(line)) return true;
+      if (/\.readObject\s*\(/.test(line) && !/JsonReader|XmlReader|DataReader/.test(line)) return true;
+      return false;
+    },
+    guards: [/ObjectInputFilter/, /JEP.290/i, /ValidatingObjectInputStream/, /SerialKiller/i, /Jackson/, /Gson/],
+  },
+  {
+    id: 'L1-036',
+    title: 'Spring Security permitAll on sensitive path',
+    layer: 'L1',
+    severity: 'high',
+    owasp: 'A01:2021 Broken Access Control',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description: 'permitAll() in Spring Security configuration disables authentication for the matched endpoints. If applied too broadly, it exposes protected resources.',
+    recommendation: 'Review all permitAll() usages. Apply only to public endpoints (login, health, static). Use authenticated() or hasRole() as the default.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      return /\.permitAll\s*\(/.test(line);
+    },
+    guards: [/\.authenticated\s*\(/, /\.hasRole\s*\(/, /\.hasAuthority\s*\(/, /\.denyAll\s*\(/],
+  },
+  {
+    id: 'L1-037',
+    title: 'Java/Kotlin CORS @CrossOrigin wildcard',
+    layer: 'L1',
+    severity: 'high',
+    owasp: 'A05:2021 Security Misconfiguration',
+    nis2: 'Art. 21(2)(d) — Network security',
+    description: '@CrossOrigin without explicit origins or with origins="*" allows any website to make cross-origin requests.',
+    recommendation: 'Specify explicit allowed origins: @CrossOrigin(origins = "https://app.example.com"). Configure CORS centrally via WebMvcConfigurer.',
+    test: (line) => {
+      if (/^\s*\/\//.test(line)) return false;
+      // @CrossOrigin without origins or with "*"
+      if (/@CrossOrigin\s*$/.test(line.trim())) return true;
+      if (/@CrossOrigin\s*\(\s*\)/.test(line)) return true;
+      if (/@CrossOrigin\s*\(.*origins\s*=\s*"\*"/.test(line)) return true;
+      return false;
+    },
+    guards: [/origins\s*=\s*"https?:/, /allowedOrigins.*https?:/i, /CorsConfiguration/],
+  },
 ];
 
 // Negative check rules for L1 (whole-codebase checks)
