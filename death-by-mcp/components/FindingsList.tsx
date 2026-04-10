@@ -25,7 +25,7 @@ export default function FindingsList({ findings }: { findings: ScanFinding[] }) 
       <div className="rounded-lg border border-mcp-green/30 bg-mcp-green/5 p-6 text-center">
         <p className="text-mcp-green font-semibold">No vulnerabilities detected</p>
         <p className="mt-1 text-sm text-slate-400">
-          L0-L1 scan passed. Consider a full L2-L4 audit for production deployments.
+          L0-L1 scan passed. Consider a knowledge graph-driven L2-L4 audit for production deployments.
         </p>
       </div>
     );

@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
   // Validate URL
   if (!validateRepoUrl(repoUrl)) {
     return NextResponse.json(
-      { error: 'Invalid URL. Only public GitHub repository URLs (https://github.com/...) are accepted.' },
+      { error: 'Invalid URL. Only public GitHub, GitLab, and Bitbucket repository URLs are accepted.' },
       { status: 400 },
     );
   }

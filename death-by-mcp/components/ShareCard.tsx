@@ -83,7 +83,7 @@ export default function ShareCard({ result }: { result: ScanResult }) {
 
         {/* Footer */}
         <div className="border-t border-mcp-border pt-3 text-[10px] text-slate-500">
-          Scanned by compuute-scan v0.3.0 | compuute.se | {date}
+          Scanned by compuute-scan v0.5.0 | compuute.se | {date}
         </div>
       </div>
     </div>
