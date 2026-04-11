@@ -1,18 +1,20 @@
 # compuute-scan
 
-**Open-source security scanner for MCP servers. Detects sandboxing & code execution risks across TypeScript, JavaScript, Python, and Go (81% of the MCP ecosystem). Zero dependencies.**
+**Open-source security scanner for MCP servers. Detects sandboxing, code execution, dependency, and supply-chain risks across all languages with official MCP SDKs: TypeScript, JavaScript, Python, Go, Rust, C#, Java, and Kotlin. Zero dependencies.**
 
-[![Version](https://img.shields.io/badge/version-0.3.0-blue)](#)
+[![Version](https://img.shields.io/badge/version-0.6.0-blue)](#)
 [![License](https://img.shields.io/badge/license-MIT-green)](#license)
 [![CI](https://github.com/Compuute/compuute-scan/actions/workflows/ci.yml/badge.svg)](https://github.com/Compuute/compuute-scan/actions/workflows/ci.yml)
+
+> **v0.6.0 — now with .NET, Java, and Kotlin support.** Released alongside the official [Microsoft MCP C# SDK v1.0](https://devblogs.microsoft.com/dotnet/release-v10-of-the-official-mcp-csharp-sdk/) (March 2026) and the official Java/Spring MCP SDK. First security scanner to cover every language with an official MCP SDK.
 
 ---
 
 ## What It Does
 
-`compuute-scan` analyzes MCP (Model Context Protocol) server source code for security vulnerabilities before deployment. It runs fully offline, requires no API keys, and covers **L0 Discovery** and **L1 Sandboxing** — the foundational security layers every MCP server needs.
+`compuute-scan` analyzes MCP (Model Context Protocol) server source code for security vulnerabilities before deployment. It runs fully offline, requires no API keys, and covers **L0 Discovery**, **L1 Sandboxing**, and **dependency-level risks** — the foundational security layers every MCP server needs.
 
-**Supports TypeScript, JavaScript, Python, and Go** — covering ~81% of the MCP server ecosystem (based on 11,720+ GitHub repos, April 2026).
+**Supports every language with an official MCP SDK:** TypeScript, JavaScript, Python, Go, Rust, C#, Java, and Kotlin. Aligned with the MCP 2025-11-25 specification and compatible with the official Microsoft C# SDK, the Java/Spring SDK, and the community TypeScript/Python/Go/Rust SDKs.
 
 ## Quick Start
 
@@ -61,27 +63,42 @@ docker compose build
 
 ### Open Source Rules (L0 + L1)
 
-**22 rules** covering code execution, sandboxing, and discovery:
+**37 per-file rules + 2 negative rules + 3 dependency checks** covering code execution, sandboxing, discovery, and supply chain:
 
 | Category | Examples |
 |----------|----------|
-| **Code execution** | `eval()`, `exec.Command`, `pickle.loads`, `yaml.load(Loader=FullLoader)` |
+| **Code execution** | `eval()`, `exec.Command`, `pickle.loads`, `yaml.load`, `Runtime.exec`, `Process.Start` |
+| **Deserialization** | `BinaryFormatter`, `ObjectInputStream`, `SoapFormatter` — banned .NET and Java sinks |
 | **Path traversal** | Unsanitized file paths, missing `realpath()` checks |
-| **CORS misconfiguration** | Wildcard origins in cors(), Starlette, rs/cors |
-| **SSL/TLS bypass** | `verify=False`, `rejectUnauthorized: false`, `InsecureSkipVerify` |
-| **SQL injection** | Python f-string queries, Go `fmt.Sprintf` queries |
-| **Insecure random** | `Math.random()`, `random.choices()`, `rand.Intn()` for security |
+| **CORS misconfiguration** | Wildcard origins across Express, Starlette, rs/cors, ASP.NET Core `AllowAnyOrigin`, Spring `@CrossOrigin` |
+| **SSL/TLS bypass** | `verify=False`, `rejectUnauthorized: false`, `InsecureSkipVerify`, `danger_accept_invalid_certs` |
+| **SQL injection** | Python f-string, Go `fmt.Sprintf`, Rust `format!()`, C# `SqlCommand`, Java JDBC string-concat |
+| **Command injection** | Shell execution with untrusted input across all 8 languages |
+| **Auth bypass** | C# `[AllowAnonymous]`, Spring `permitAll()` on sensitive endpoints |
+| **Memory safety** | Rust `unsafe {}` blocks, missing `#[deny(unsafe_code)]` |
+| **Insecure random** | `Math.random()`, `random.choices()`, `rand.Intn()` for security contexts |
 | **Template injection** | Go `text/template` for HTML output |
 | **Security headers** | Missing helmet/secure-headers middleware |
-| **Discovery** | Transport detection, tool inventory, dependency pinning, go.mod/pyproject.toml parsing |
+| **Known CVEs (offline)** | 40+ top npm/PyPI/Go packages with curated vulnerable version ranges |
+| **Dependency age** | Packages two or more major versions behind current |
+| **License compliance** | Copyleft licenses (GPL, AGPL, LGPL, SSPL) in `node_modules` |
+| **Discovery** | Transport detection, tool inventory, dependency pinning across 8 package managers |
 
 ### Language-Specific Rules
 
-| Language | Ecosystem Share | Key Detections |
+| Language | MCP SDK Status | Key Detections |
 |---|---|---|
-| **TypeScript/JS** | 40% | eval, child_process, CORS, npm hooks, unpinned git deps |
-| **Python** | 35% | pickle, YAML unsafe load, f-string SQL, Starlette CORS, verify=False |
-| **Go** | 6% | exec.Command+sh, fmt.Sprintf SQL, InsecureSkipVerify, text/template XSS, rs/cors |
+| **TypeScript/JS** | Official (Anthropic) | `eval`, `child_process`, CORS, npm hooks, unpinned git deps |
+| **Python** | Official (Anthropic) | `pickle`, YAML unsafe load, f-string SQL, Starlette CORS, `verify=False` |
+| **Go** | Official | `exec.Command`+sh, `fmt.Sprintf` SQL, `InsecureSkipVerify`, `text/template` XSS, `rs/cors` |
+| **Rust** | Official | `unsafe {}`, `Command::new` + `format!`, SQL via `format!`, `danger_accept_invalid_certs` |
+| **C#/.NET** | **Official (Microsoft, March 2026)** | `Process.Start`, `SqlCommand` concat, `[AllowAnonymous]`, `BinaryFormatter`, `AllowAnyOrigin` |
+| **Java** | **Official (Spring/Java)** | `Runtime.exec`, JDBC concat, `ObjectInputStream`, Spring `permitAll`, `@CrossOrigin(*)` |
+| **Kotlin** | Via Java SDK | Same as Java — JDBC, ObjectInputStream, Spring Security |
+
+### Parsed Dependency Files
+
+`package.json`, `requirements.txt`, `pyproject.toml`, `go.mod`, `Cargo.toml`, `.csproj`, `pom.xml`, `build.gradle`, `build.gradle.kts`.
 
 ### Guard Detection
 
@@ -93,15 +110,15 @@ Detects the **absence** of security controls across the entire codebase: no inpu
 
 ## Full Security Assessment
 
-The open-source scanner covers foundational L0-L1 risks. Production MCP deployments need deeper analysis:
+The open-source scanner covers foundational L0-L1 risks and dependency-level checks. Production MCP deployments — especially those subject to NIS2, DORA, or GDPR — need deeper analysis with cross-file taint tracking and compliance evidence:
 
-| Layer | What You Get | Rules |
-|-------|-------------|-------|
-| **L2 Authorization** | RBAC, secret management, JWT/OAuth, PII/GDPR compliance, weak crypto | 11 |
-| **L3 Tool Integrity** | SSRF, injection, prompt poisoning, PII in responses, supply chain | 10 |
-| **L4 Runtime Monitoring** | Audit logging, rate limiting, error leakage, ReDoS | 6 |
+| Layer | What You Get | Analysis |
+|-------|-------------|----------|
+| **L2 Authorization** | RBAC, secret management, JWT/OAuth, PII/GDPR compliance, weak crypto | Knowledge-graph driven |
+| **L3 Tool Integrity** | SSRF, injection, prompt poisoning, PII in responses, supply chain | Taint tracking |
+| **L4 Runtime Monitoring** | Audit logging, rate limiting, error leakage, ReDoS | Cross-file behavioral |
 
-**49 rules total. OWASP Top 10 (10/10). NIS2 Art. 21 (7/7). GDPR (6/6). DORA (4/7).**
+**OWASP Top 10 (10/10). NIS2 Art. 21 (7/7). GDPR (6/6). DORA (4/7).** The open-source tier identifies. The audit tier traces attack paths, produces filing-ready compliance evidence, and prioritizes based on reachability — not just presence.
 
 > **[Book a Compuute Professional Audit](https://compuute.se/audit)** — full L0-L4 assessment with compliance mapping for OWASP, NIS2, GDPR, and DORA.
 
@@ -163,11 +180,13 @@ compuute-scan <path> [options]
 
 ## Adding Rules
 
-Rules are defined as objects in `compuute-scan.js`:
+As of v0.5.0, the scanner is organized as modules under `src/` and concatenated into `compuute-scan.js` by `scripts/build.js`. Do not edit the top-level `compuute-scan.js` directly — it is generated output.
+
+Rules live in `src/rules-l1.js` as objects:
 
 ```javascript
 {
-  id: 'L1-010',
+  id: 'L1-037',
   title: 'Description',
   layer: 'L1',
   severity: 'high',
@@ -180,7 +199,15 @@ Rules are defined as objects in `compuute-scan.js`:
 }
 ```
 
-See [ROADMAP.md](ROADMAP.md) for planned features and language support timeline.
+Build and run tests:
+
+```bash
+npm run build      # regenerates compuute-scan.js from src/
+npm test           # runs the 231-assertion suite
+npm run verify     # runs the supply-chain integrity check
+```
+
+See [CHANGELOG.md](CHANGELOG.md) for release history and [ROADMAP.md](ROADMAP.md) for planned features.
 
 ## Testing
 
@@ -188,7 +215,7 @@ See [ROADMAP.md](ROADMAP.md) for planned features and language support timeline.
 npm test
 ```
 
-The test suite validates detection accuracy against purpose-built vulnerable MCP servers.
+The test suite runs 231 assertions covering URL validation, scoring, credential redaction, rate limiting, inline-ignore handling, config loading, function-boundary detection, per-rule pattern matching for every rule, dependency CVE/age checks, and an end-to-end self-scan.
 
 ## License
 
