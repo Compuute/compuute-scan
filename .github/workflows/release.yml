@@ -1,0 +1,38 @@
+name: Release to npm
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Integrity verification
+        run: node verify-integrity.js --audit-only
+
+      - name: Unit tests
+        run: node death-by-mcp/test.js
+
+      - name: Self-scan
+        run: node compuute-scan.js . --json --fail-on-severity critical 2>/dev/null > /dev/null
+
+      - name: Print SHA-256 for release notes
+        run: sha256sum compuute-scan.js
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -1,15 +1,19 @@
 {
   "name": "compuute-scan",
-  "version": "0.2.0",
-  "description": "Static security scanner for MCP servers. Zero dependencies. OWASP LLM Top 10 + NIS2 mapped.",
+  "version": "0.6.0",
+  "description": "Static security scanner for MCP servers. Covers 84%+ of the MCP ecosystem (TS/JS/Python/Go/Rust/C#/Java/Kotlin). Zero dependencies. OWASP + NIS2 + GDPR + DORA mapped. Offline CVE matching.",
   "main": "compuute-scan.js",
   "bin": {
     "compuute-scan": "./compuute-scan.js"
   },
   "scripts": {
-    "test": "bash test.sh"
+    "build": "node scripts/build.js",
+    "test": "node death-by-mcp/test.js",
+    "verify": "node verify-integrity.js",
+    "verify:hash": "node verify-integrity.js --hash",
+    "prepublishOnly": "node verify-integrity.js --audit-only && node death-by-mcp/test.js"
   },
-  "keywords": ["mcp", "security", "scanner", "owasp", "nis2", "dora", "audit"],
+  "keywords": ["mcp", "security", "scanner", "owasp", "nis2", "dora", "gdpr", "audit", "pii", "python", "golang", "typescript", "rust", "csharp", "java", "kotlin", "cve"],
   "author": "Compuute AB",
   "license": "MIT",
   "private": false,
@@ -24,6 +28,8 @@
   },
   "files": [
     "compuute-scan.js",
+    "verify-integrity.js",
+    "SECURITY.md",
     "README.md",
     "LICENSE"
   ]

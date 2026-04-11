@@ -1,0 +1,60 @@
+# Death by MCP — Isolated scanning environment
+# Two-stage pipeline:
+#   1. Clone: has network (git only), no-new-privileges, capped resources
+#   2. Scan:  ZERO network, read-only FS, all caps dropped, capped resources
+
+services:
+  # Clone stage — has network ONLY for git clone
+  clone:
+    build:
+      context: .
+      dockerfile: Dockerfile.scanner
+    entrypoint: ["git", "clone", "--depth", "1", "--config", "core.hooksPath=/dev/null"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=100M
+    volumes:
+      - scan-work:/work
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_RAW
+    networks:
+      - clone-net
+
+  # Scan stage — ZERO network, read-only, fully sandboxed
+  scan:
+    build:
+      context: .
+      dockerfile: Dockerfile.scanner
+    entrypoint: ["node", "/home/scanner/compuute-scan.js"]
+    read_only: true
+    network_mode: "none"
+    tmpfs:
+      - /tmp:size=50M
+    volumes:
+      - scan-work:/work:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  scan-work:
+    name: death-by-mcp-scan-work
+
+networks:
+  clone-net:
+    driver: bridge
