@@ -3,3 +3,6 @@ reports/
 test-repos/
 *.log
 .DS_Store
+.claude/
+.secrets
+.nightly-work/
