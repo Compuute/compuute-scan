@@ -9,8 +9,12 @@ All notable changes to `compuute-scan` are documented here. The format follows [
 ### Added
 
 - **L1-038 — MCP runner-binary argument injection** — detects `spawn`/`execFile`/`exec`/`spawnSync`/`fork`/`Popen`/`subprocess.*` calls whose first argument is `npx`, `uvx`, `pipx`, or `pnpx` and whose argument list is variable, contains template literals, or is otherwise non-literal. Covers the Ox Security flag-smuggling vector (`-c`, `--package=`, `--from`, `-p`) which bypasses package-name allowlists. L1-002's "use `execFile` with an argument array" guidance does NOT mitigate this class when the binary is a package runner. Mapped to CWE-88, CAPEC-88, OWASP A03:2021, NIS2 Art. 21(2)(e).
-- **Fixtures + regression tests** — `death-by-mcp/fixtures-l1-038/` with four positive cases (variable args, template literals, `--from` smuggling, spread args) and two negatives (pinned package + `shell: false`, in-comment reference). Verified against batch scan of 19 production MCP servers — 3 true-positive hits in `trycua/cua`.
+- **Fixtures + regression tests** — `death-by-mcp/fixtures-l1-038/` with four positive cases (variable args, template literals, `--from` smuggling, spread args) and two negatives (pinned package + `shell: false`, in-comment reference). Verified against batch scan of 19 production MCP servers — 3 raw pattern matches in `trycua/cua`: 1 in runtime MCP code (`libs/cuabot/src/client.ts:234`, where `currentSessionName` reaches `spawn('npx', spawnArgs, …)` via an external setter) and 2 in build-time docs-generator scripts (`scripts/docs-generators/*.ts`) where args resolve to internal constants and the file is not part of the MCP runtime attack surface. The 2 build-time matches are technically CWE-88 patterns but not exploitable in the Ox Security threat model (no attacker-controlled path into a build script).
 - **Comment-skip hardening** — single-line `/* … */` block comments are now skipped by L1-038's test function (defense against in-comment example code triggering findings).
+
+### Known limitations
+
+- **L1-038 has no path-context awareness.** Build-time scripts under `scripts/`, `tools/`, `build/`, or files with a `#!/usr/bin/env npx` shebang will match the pattern even though they are not part of the runtime MCP attack surface. Manual triage is required to separate runtime exposure from internal tooling. A future release will add path-aware severity downgrade (high → info for non-runtime paths).
 
 ### Fixed
 
