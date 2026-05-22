@@ -1044,7 +1044,7 @@ try {
 assert('Self-scan: produces valid JSON', selfScanJson !== null);
 assert('Self-scan: has findings array', selfScanJson && Array.isArray(selfScanJson.findings));
 assert('Self-scan: has discovery data', selfScanJson && selfScanJson.l0Discovery !== undefined);
-assert('Self-scan: has version', selfScanJson && selfScanJson.version === '0.6.1');
+assert('Self-scan: has version', selfScanJson && selfScanJson.version === '0.6.2');
 
 // ─────────────────────────────────────────────
 // L1-038 — npx/uvx/pipx argument injection (regression tests)

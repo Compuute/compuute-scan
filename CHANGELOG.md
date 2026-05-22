@@ -2,6 +2,24 @@
 
 All notable changes to `compuute-scan` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] — 2026-05-22
+
+**Focus: cross-rule consistency post-L1-038. Closes runner-binary blindspot in adjacent recommendations.**
+
+L1-038 (added in 0.6.1) documented that `execFile`/`spawn` with an argument array does NOT mitigate argument injection when the spawned binary is itself a package runner. The same guidance gap was present in five sibling rules (one per language) whose recommendations advised "pass arguments separately" without the runner-binary caveat. This release adds an explicit caveat to each, cross-referencing L1-038. No detection logic changed; this is a recommendation-text correction so the scanner no longer advises a pattern its own L1-038 rule flags.
+
+### Changed
+
+- **L1-002 (JS exec/spawn)** — recommendation now notes that argument-array form does not mitigate injection when the binary is `npx`, `pnpx`, `yarn dlx`, or `bunx`. See L1-038.
+- **L1-004 (Python os.system)** — recommendation now notes the same for `uvx`, `pipx`, `poetry run`, `hatch run`.
+- **L1-018 (Go exec.Command)** — recommendation now notes the same for `go run/install` and cross-language runners invoked from Go.
+- **L1-024 (Rust Command::new)** — recommendation now notes the same for `cargo run/install` and cross-language runners invoked from Rust.
+- **L1-033 (Java Runtime.exec)** — recommendation now notes the same for `mvn exec`, `gradle run`, `jbang`, and cross-language runners invoked from Java.
+
+### Known limitations
+
+- L1-038's detection still only covers `npx`/`uvx`/`pipx`/`pnpx` directly. The caveat text in L1-018/L1-024/L1-033 documents the broader class but no new detection patterns are added for Go/Rust/Java runners in this release. Planned for a future release.
+
 ## [0.6.1] — 2026-05-22
 
 **Focus: MCP runner-binary argument injection (CWE-88).**

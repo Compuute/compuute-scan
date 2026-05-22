@@ -1,6 +1,6 @@
 {
   "name": "compuute-scan",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Static security scanner for MCP servers. Covers 84%+ of the MCP ecosystem (TS/JS/Python/Go/Rust/C#/Java/Kotlin). Zero dependencies. OWASP + NIS2 + GDPR + DORA mapped. Offline CVE matching.",
   "main": "compuute-scan.js",
   "bin": {

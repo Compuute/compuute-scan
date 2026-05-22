@@ -32,7 +32,7 @@ const L1_RULES = [
     owasp: 'A03:2021 Injection',
     nis2: 'Art. 21(2)(e) — Secure development',
     description: 'exec/execSync/spawn can execute arbitrary shell commands. Use execFile with explicit arguments instead.',
-    recommendation: 'Use child_process.execFile() or spawn() with an argument array (no shell interpolation). Never pass user input to exec().',
+    recommendation: 'Use child_process.execFile() or spawn() with an argument array (no shell interpolation). Never pass user input to exec(). NOTE: passing arguments separately does NOT mitigate injection when the spawned binary is itself a package runner (npx, pnpx, yarn dlx, bunx) — the runner interprets flags like -c, --package=, -p to load attacker-controlled code. See L1-038.',
     test: (line) => {
       if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*#/.test(line)) return false;
       // Exclude regex.exec(), mongoose .exec(), promise .exec(), query.exec()
@@ -73,7 +73,7 @@ const L1_RULES = [
     owasp: 'A03:2021 Injection',
     nis2: 'Art. 21(2)(e) — Secure development',
     description: 'os.system() executes commands through the system shell with no input sanitization.',
-    recommendation: 'Use subprocess.run() with explicit argument lists instead of os.system().',
+    recommendation: 'Use subprocess.run() with explicit argument lists instead of os.system(). NOTE: passing arguments separately does NOT mitigate injection when the spawned binary is itself a package runner (uvx, pipx, poetry run, hatch run) — the runner interprets flags like --from, -c to load attacker-controlled code. See L1-038.',
     test: (line) => {
       if (/^\s*#/.test(line)) return false;
       return /\bos\.system\s*\(/.test(line);
@@ -335,7 +335,7 @@ const L1_RULES = [
     owasp: 'A03:2021 Injection',
     nis2: 'Art. 21(2)(e) — Secure development',
     description: 'Using exec.Command with fmt.Sprintf or string concatenation enables shell injection if user input is interpolated. Go exec.Command does not use a shell by default, but passing concatenated strings to "/bin/sh -c" re-introduces the risk.',
-    recommendation: 'Pass arguments as separate parameters to exec.Command (arg-per-slot). Never use fmt.Sprintf to build command strings. Avoid "/bin/sh", "-c" with user input.',
+    recommendation: 'Pass arguments as separate parameters to exec.Command (arg-per-slot). Never use fmt.Sprintf to build command strings. Avoid "/bin/sh", "-c" with user input. NOTE: arg-per-slot does NOT mitigate injection when the spawned binary is itself a tool that interprets flags to load other code (go run/install, cross-language runners like npx/uvx invoked from Go). See L1-038.',
     test: (line) => {
       if (/^\s*\/\//.test(line)) return false;
       // exec.Command with sh -c or bash -c
@@ -452,7 +452,7 @@ const L1_RULES = [
     owasp: 'A03:2021 Injection',
     nis2: 'Art. 21(2)(e) — Secure development',
     description: 'std::process::Command::new() with format! or user-controlled strings enables command injection. Unlike Go, Rust Command bypasses the shell by default, but shell injection is still possible via /bin/sh -c.',
-    recommendation: 'Pass arguments via .arg() instead of building command strings. Never use format! to construct command arguments. Validate input against an allowlist.',
+    recommendation: 'Pass arguments via .arg() instead of building command strings. Never use format! to construct command arguments. Validate input against an allowlist. NOTE: .arg() does NOT mitigate injection when the spawned binary is itself a tool that interprets flags to load other code (cargo run/install, cross-language runners like npx/uvx invoked from Rust). See L1-038.',
     test: (line) => {
       if (/^\s*\/\//.test(line)) return false;
       // Command::new with format! or variable (not literal)
@@ -597,7 +597,7 @@ const L1_RULES = [
     owasp: 'A03:2021 Injection',
     nis2: 'Art. 21(2)(e) — Secure development',
     description: 'Runtime.getRuntime().exec() executes system commands. If user input is concatenated into the command string, it enables command injection.',
-    recommendation: 'Use ProcessBuilder with explicit argument lists instead. Never concatenate user input into command strings. Validate input against an allowlist.',
+    recommendation: 'Use ProcessBuilder with explicit argument lists instead. Never concatenate user input into command strings. Validate input against an allowlist. NOTE: ProcessBuilder with explicit args does NOT mitigate injection when the spawned binary is itself a tool that interprets flags to load other code (mvn exec, gradle run, jbang, cross-language runners like npx/uvx invoked from Java). See L1-038.',
     test: (line) => {
       if (/^\s*\/\//.test(line)) return false;
       // Runtime.getRuntime().exec(
