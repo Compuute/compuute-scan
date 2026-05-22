@@ -1044,7 +1044,49 @@ try {
 assert('Self-scan: produces valid JSON', selfScanJson !== null);
 assert('Self-scan: has findings array', selfScanJson && Array.isArray(selfScanJson.findings));
 assert('Self-scan: has discovery data', selfScanJson && selfScanJson.l0Discovery !== undefined);
-assert('Self-scan: has version', selfScanJson && selfScanJson.version === '0.6.0');
+assert('Self-scan: has version', selfScanJson && selfScanJson.version === '0.6.1');
+
+// ─────────────────────────────────────────────
+// L1-038 — npx/uvx/pipx argument injection (regression tests)
+// ─────────────────────────────────────────────
+
+console.log('\n=== L1-038 Runner Argument Injection ===');
+
+const L1_038_FIXTURE_DIR = require('path').join(__dirname, 'fixtures-l1-038');
+const L1_038_OUT = require('path').join(__dirname, 'fixtures-l1-038-scan.json');
+
+function findL1_038Findings(file) {
+  try {
+    require('child_process').execFileSync('node', [
+      require('path').join(__dirname, '..', 'compuute-scan.js'),
+      L1_038_FIXTURE_DIR,
+      '--json',
+      '--output', L1_038_OUT,
+    ], { stdio: 'pipe', timeout: 15000 });
+  } catch { /* nonzero exit on findings is OK */ }
+  const result = JSON.parse(require('fs').readFileSync(L1_038_OUT, 'utf-8'));
+  return (result.findings || []).filter(f => f.id === 'L1-038' && f.file && f.file.endsWith(file));
+}
+
+if (require('fs').existsSync(L1_038_FIXTURE_DIR)) {
+  // Positive — should flag
+  assert('L1-038 flags npx with variable args (bare identifier)',
+    findL1_038Findings('positive-npx-variable.js').length > 0);
+  assert('L1-038 flags uvx with --from + variable url',
+    findL1_038Findings('positive-uvx-variable.py').length > 0);
+  assert('L1-038 flags pipx with template literal',
+    findL1_038Findings('positive-pipx-template.js').length > 0);
+  assert('L1-038 flags pnpx with variable args',
+    findL1_038Findings('positive-pnpx-variable.ts').length > 0);
+
+  // Negative — should NOT flag
+  assert('L1-038 ignores npx with fully-literal args + shell:false',
+    findL1_038Findings('negative-pinned.js').length === 0);
+  assert('L1-038 ignores npx call inside a comment',
+    findL1_038Findings('negative-comment.js').length === 0);
+} else {
+  assert('L1-038 fixtures directory present', false);
+}
 
 // ─────────────────────────────────────────────
 // Summary

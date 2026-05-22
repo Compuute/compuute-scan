@@ -6,3 +6,5 @@ test-repos/
 .claude/
 .secrets
 .nightly-work/
+fixtures-l1-038-scan.json
+reports/nightly-batch-*/

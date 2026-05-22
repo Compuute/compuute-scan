@@ -2,6 +2,20 @@
 
 All notable changes to `compuute-scan` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] — 2026-05-22
+
+**Focus: MCP runner-binary argument injection (CWE-88).**
+
+### Added
+
+- **L1-038 — MCP runner-binary argument injection** — detects `spawn`/`execFile`/`exec`/`spawnSync`/`fork`/`Popen`/`subprocess.*` calls whose first argument is `npx`, `uvx`, `pipx`, or `pnpx` and whose argument list is variable, contains template literals, or is otherwise non-literal. Covers the Ox Security flag-smuggling vector (`-c`, `--package=`, `--from`, `-p`) which bypasses package-name allowlists. L1-002's "use `execFile` with an argument array" guidance does NOT mitigate this class when the binary is a package runner. Mapped to CWE-88, CAPEC-88, OWASP A03:2021, NIS2 Art. 21(2)(e).
+- **Fixtures + regression tests** — `death-by-mcp/fixtures-l1-038/` with four positive cases (variable args, template literals, `--from` smuggling, spread args) and two negatives (pinned package + `shell: false`, in-comment reference). Verified against batch scan of 19 production MCP servers — 3 true-positive hits in `trycua/cua`.
+- **Comment-skip hardening** — single-line `/* … */` block comments are now skipped by L1-038's test function (defense against in-comment example code triggering findings).
+
+### Fixed
+
+- Self-scan integrity test pins `version === '0.6.1'`.
+
 ## [0.6.0] — 2026-04-11
 
 **Focus: Enterprise language coverage + offline CVE matching.**

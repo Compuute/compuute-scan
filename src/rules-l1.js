@@ -683,6 +683,46 @@ const L1_RULES = [
     },
     guards: [/origins\s*=\s*"https?:/, /allowedOrigins.*https?:/i, /CorsConfiguration/],
   },
+  {
+    id: 'L1-038',
+    title: 'MCP runner-binary argument injection (npx/uvx/pipx/pnpx)',
+    layer: 'L1',
+    severity: 'high',
+    owasp: 'A03:2021 Injection',
+    cwe: 'CWE-88',
+    capec: 'CAPEC-88',
+    nis2: 'Art. 21(2)(e) — Secure development',
+    description:
+      'Spawning npx/uvx/pipx/pnpx with non-literal arguments enables argument injection. ' +
+      'Allowlists on the package name fail because the runner itself interprets flags like ' +
+      '-c, --package=, --from, -p — rerouting execution to attacker-controlled code without ' +
+      'invoking a shell. execFile/spawn with an argument array does NOT mitigate this when ' +
+      'the binary is a package runner.',
+    recommendation:
+      'Pin the exact package (e.g., `npx --package=@org/pinned@1.2.3 --` and place user args ' +
+      'after `--`). Validate every arg against a flag-aware allowlist that rejects any arg ' +
+      'starting with `-` unless explicitly permitted. Prefer invoking the resolved binary ' +
+      'directly (absolute path of the installed package) instead of the package runner. ' +
+      'Avoid `shell: true` on any platform.',
+    test: (line) => {
+      // Skip line comments (//), block-comment continuations (*),
+      // single-line block comments (/* ... */), and Python comments (#).
+      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line) || /^\s*\/\*/.test(line) || /^\s*#/.test(line)) return false;
+      const spawnRunner =
+        /\b(?:spawn|spawnSync|execFile|execFileSync|exec|execSync|fork|Popen|subprocess\.(?:run|Popen|call|check_output|check_call))\s*\(\s*['"`](?:npx|uvx|pipx|pnpx)['"`]/;
+      if (!spawnRunner.test(line)) return false;
+      const hasVariableArg = /,\s*[a-zA-Z_$][\w$]*\s*[,)]/.test(line);
+      const hasTemplateInLine = /`[^`]*\$\{/.test(line);
+      const hasArrayLiteral = /,\s*\[/.test(line);
+      return hasVariableArg || hasTemplateInLine || !hasArrayLiteral;
+    },
+    guards: [
+      /--package=['"][\w@/.\-]+@[\d.]+/,
+      /\.startsWith\s*\(\s*['"]-['"]\s*\)/,
+      /\bnpxAllowlist\b|\bflagAllowlist\b|\bsanitizeNpxArgs\b/,
+      /shell\s*:\s*false/,
+    ],
+  },
 ];
 
 // Negative check rules for L1 (whole-codebase checks)

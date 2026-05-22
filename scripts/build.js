@@ -29,7 +29,7 @@ const MODULES = [
 ];
 
 const HEADER = `#!/usr/bin/env node
-// compuute-scan v0.6.0 — MCP Server Security Scanner
+// compuute-scan v0.6.1 — MCP Server Security Scanner
 // Compuute AB | daniel@compuute.se
 // Zero external dependencies. Node.js built-ins only.
 //

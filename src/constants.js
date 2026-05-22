@@ -2,7 +2,7 @@
 // Constants
 // ─────────────────────────────────────────────
 
-const VERSION = '0.6.0';
+const VERSION = '0.6.1';
 const MAX_FILE_SIZE = 500 * 1024; // 500 KB
 const MAX_CODE_SNIPPET = 120; // max characters in code/guardCode snippets
 const GUARD_WINDOW = 15; // lines above/below to check for guards
