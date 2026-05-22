@@ -693,11 +693,15 @@ const L1_RULES = [
     capec: 'CAPEC-88',
     nis2: 'Art. 21(2)(e) — Secure development',
     description:
-      'Spawning npx/uvx/pipx/pnpx with non-literal arguments enables argument injection. ' +
-      'Allowlists on the package name fail because the runner itself interprets flags like ' +
-      '-c, --package=, --from, -p — rerouting execution to attacker-controlled code without ' +
-      'invoking a shell. execFile/spawn with an argument array does NOT mitigate this when ' +
-      'the binary is a package runner.',
+      'PATTERN MATCH — exploitability depends on whether arguments derive from attacker-' +
+      'controllable input. Manual dataflow triage required; this rule reads syntax, not ' +
+      'data provenance. Spawning npx/uvx/pipx/pnpx with non-literal arguments enables ' +
+      'argument injection IF args are externally influenced. Allowlists on the package ' +
+      'name fail because the runner itself interprets flags like -c, --package=, --from, ' +
+      '-p — rerouting execution to attacker-controlled code without invoking a shell. ' +
+      'execFile/spawn with an argument array does NOT mitigate this when the binary is ' +
+      'a package runner. Common false-positive contexts: build-time docs generators, ' +
+      'CI scripts, and dev tooling in scripts/ or tools/ directories.',
     recommendation:
       'Pin the exact package (e.g., `npx --package=@org/pinned@1.2.3 --` and place user args ' +
       'after `--`). Validate every arg against a flag-aware allowlist that rejects any arg ' +

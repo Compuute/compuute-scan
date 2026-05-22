@@ -14,7 +14,8 @@ All notable changes to `compuute-scan` are documented here. The format follows [
 
 ### Known limitations
 
-- **L1-038 has no path-context awareness.** Build-time scripts under `scripts/`, `tools/`, `build/`, or files with a `#!/usr/bin/env npx` shebang will match the pattern even though they are not part of the runtime MCP attack surface. Manual triage is required to separate runtime exposure from internal tooling. A future release will add path-aware severity downgrade (high → info for non-runtime paths).
+- **L1-038 is a pattern-breadth detector, not an exploit detector.** It reads syntax, not data provenance, so it cannot distinguish a variable populated via an external setter (e.g., `currentSessionName` in a runtime MCP path → true positive) from a variable holding an internal constant (e.g., `generatorPath` in a build script → false positive). Every `high` finding is therefore a *flag for manual triage*, not an assertion of exploitability. The finding description states this explicitly. Common false-positive contexts: build-time docs generators, CI scripts, dev tooling under `scripts/`/`tools/`/`build/`, and files with a `#!/usr/bin/env npx` shebang.
+- **No path-context awareness.** A future release may add a `severity: info` downgrade for non-runtime paths to reduce manual triage burden, but the present design (broad detection + explicit triage requirement) is intentional for an L1 layer.
 
 ### Fixed
 
