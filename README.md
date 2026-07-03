@@ -2,11 +2,11 @@
 
 **Open-source security scanner for MCP servers. Detects sandboxing, code execution, dependency, and supply-chain risks across all languages with official MCP SDKs: TypeScript, JavaScript, Python, Go, Rust, C#, Java, and Kotlin. Zero dependencies.**
 
-[![Version](https://img.shields.io/badge/version-0.6.0-blue)](#)
+[![Version](https://img.shields.io/badge/version-0.6.2-blue)](#)
 [![License](https://img.shields.io/badge/license-MIT-green)](#license)
 [![CI](https://github.com/Compuute/compuute-scan/actions/workflows/ci.yml/badge.svg)](https://github.com/Compuute/compuute-scan/actions/workflows/ci.yml)
 
-> **v0.6.0 — now with .NET, Java, and Kotlin support.** Released alongside the official [Microsoft MCP C# SDK v1.0](https://devblogs.microsoft.com/dotnet/release-v10-of-the-official-mcp-csharp-sdk/) (March 2026) and the official Java/Spring MCP SDK. First security scanner to cover every language with an official MCP SDK.
+> **v0.6.2 — now with .NET, Java, and Kotlin support.** Released alongside the official [Microsoft MCP C# SDK v1.0](https://devblogs.microsoft.com/dotnet/release-v10-of-the-official-mcp-csharp-sdk/) (March 2026) and the official Java/Spring MCP SDK. First security scanner to cover every language with an official MCP SDK.
 
 ---
 
