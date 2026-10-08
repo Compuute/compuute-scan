@@ -1,12 +1,12 @@
 # compuute-scan
 
-**Open-source security scanner for MCP servers. Detects sandboxing, code execution, dependency, and supply-chain risks across all languages with official MCP SDKs: TypeScript, JavaScript, Python, Go, Rust, C#, Java, and Kotlin. Zero dependencies.**
+**Open-source static security scanner for MCP servers. Detects sandboxing, code execution, dependency and supply-chain risks in TypeScript, JavaScript, Python, Go, Rust, C#, Java and Kotlin servers. Zero dependencies.**
 
-[![Version](https://img.shields.io/badge/version-0.6.2-blue)](#)
+[![Version](https://img.shields.io/badge/version-0.6.2-blue)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-green)](#license)
 [![CI](https://github.com/Compuute/compuute-scan/actions/workflows/ci.yml/badge.svg)](https://github.com/Compuute/compuute-scan/actions/workflows/ci.yml)
 
-> **v0.6.2 — now with .NET, Java, and Kotlin support.** Released alongside the official [Microsoft MCP C# SDK v1.0](https://devblogs.microsoft.com/dotnet/release-v10-of-the-official-mcp-csharp-sdk/) (March 2026) and the official Java/Spring MCP SDK. First security scanner to cover every language with an official MCP SDK.
+> **v0.6.2 adds .NET, Java and Kotlin support**, following the release of the official [Microsoft MCP C# SDK v1.0](https://devblogs.microsoft.com/dotnet/release-v10-of-the-official-mcp-csharp-sdk/) (March 2026) and the Java/Spring MCP SDK.
 
 ---
 
@@ -14,7 +14,7 @@
 
 `compuute-scan` analyzes MCP (Model Context Protocol) server source code for security vulnerabilities before deployment. It runs fully offline, requires no API keys, and covers **L0 Discovery**, **L1 Sandboxing**, and **dependency-level risks** — the foundational security layers every MCP server needs.
 
-**Supports every language with an official MCP SDK:** TypeScript, JavaScript, Python, Go, Rust, C#, Java, and Kotlin. Aligned with the MCP 2025-11-25 specification and compatible with the official Microsoft C# SDK, the Java/Spring SDK, and the community TypeScript/Python/Go/Rust SDKs.
+**Languages:** TypeScript, JavaScript, Python, Go, Rust, C#, Java and Kotlin (Kotlin via the Java SDK). Aligned with the MCP 2025-11-25 specification.
 
 ## Quick Start
 
@@ -57,9 +57,9 @@ docker compose build
 |-------|-------|-------------|
 | **L0** | Discovery — transport detection, tool inventory, dependency pinning | Open Source |
 | **L1** | Sandboxing — `eval()`, `exec.Command`, `pickle.loads`, path traversal, CORS, SSL bypass | Open Source |
-| **L2** | Authorization — RBAC, secrets, JWT, PII/GDPR, crypto | [Compuute Professional Audit](https://compuute.se/audit) |
-| **L3** | Tool Integrity — SSRF, SQL injection, prompt injection, supply chain | [Compuute Professional Audit](https://compuute.se/audit) |
-| **L4** | Monitoring — audit logging, rate limiting, error leakage, ReDoS | [Compuute Professional Audit](https://compuute.se/audit) |
+| **L2** | Authorization — RBAC, secrets, JWT, PII/GDPR, crypto | Professional audit |
+| **L3** | Tool Integrity — SSRF, SQL injection, prompt injection, supply chain | Professional audit |
+| **L4** | Monitoring — audit logging, rate limiting, error leakage, ReDoS | Professional audit |
 
 ### Open Source Rules (L0 + L1)
 
@@ -118,9 +118,9 @@ The open-source scanner covers foundational L0-L1 risks and dependency-level che
 | **L3 Tool Integrity** | SSRF, injection, prompt poisoning, PII in responses, supply chain | Taint tracking |
 | **L4 Runtime Monitoring** | Audit logging, rate limiting, error leakage, ReDoS | Cross-file behavioral |
 
-**OWASP Top 10 (10/10). NIS2 Art. 21 (7/7). GDPR (6/6). DORA (4/7).** The open-source tier identifies. The audit tier traces attack paths, produces filing-ready compliance evidence, and prioritizes based on reachability — not just presence.
+**Mapping, not certification.** Open-source findings are tagged with [OWASP Top 10 (2021)](https://owasp.org/Top10/) categories (for example `A03:2021 Injection`) and with NIS2 Art. 21 references. A tag means a rule exists for that category; it is not a compliance score. The open-source tier detects patterns by reading syntax. Reachability, attack-path tracing and compliance evidence belong to a manual audit.
 
-> **[Book a Compuute Professional Audit](https://compuute.se/audit)** — full L0-L4 assessment with compliance mapping for OWASP, NIS2, GDPR, and DORA.
+A full L0–L4 assessment is available as a [professional audit](https://compuute.se/audit).
 
 ## Docker-Isolated Scanning
 
@@ -216,6 +216,8 @@ npm test
 ```
 
 The test suite runs 231 assertions covering URL validation, scoring, credential redaction, rate limiting, inline-ignore handling, config loading, function-boundary detection, per-rule pattern matching for every rule, dependency CVE/age checks, and an end-to-end self-scan.
+
+**Validation against a known-vulnerable lab:** `./test.sh` clones Appsecco's [vulnerable-mcp-servers-lab](https://github.com/appsecco/vulnerable-mcp-servers-lab) and checks that the scanner flags the intentionally vulnerable servers.
 
 ## License
 
